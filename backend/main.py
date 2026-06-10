@@ -1,6 +1,9 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from groq import Groq
+
 
 from db import save_message, get_history
 from models import Message
@@ -10,6 +13,17 @@ load_dotenv()
 
 app = FastAPI(title="muse-ai-lite")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
+
+
 USER_ID = "demo-user"
 CONVERSATION_ID = "demo-conversation"
 
@@ -18,6 +32,14 @@ CONVERSATION_ID = "demo-conversation"
 def health():
     return {"status": "ok"}
 
+@app.post("/transcribe")
+async def transcribe(audio: UploadFile = File(...)):
+    audio_bytes = await audio.read()
+    transcription = groq_client.audio.transcriptions.create(
+        file=("audio.webm", audio_bytes),
+        model="whisper-large-v3",
+    )
+    return {"text": transcription.text}
 
 @app.websocket("/ws")
 async def websocket_chat(websocket: WebSocket):

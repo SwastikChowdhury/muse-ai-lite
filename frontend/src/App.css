@@ -110,3 +110,20 @@ body { margin: 0; font-family: 'Georgia', 'Times New Roman', serif; }
 
 .messages::-webkit-scrollbar, .whispers::-webkit-scrollbar { width: 7px; }
 .messages::-webkit-scrollbar-thumb, .whispers::-webkit-scrollbar-thumb { background: #d4a574; border-radius: 4px; }
+
+.mic-btn {
+  padding: 0.8rem 1rem;
+  background: #fff;
+  color: #8b6f47;
+  border: 1px solid #d4a574;
+  border-radius: 0.7rem;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.mic-btn.recording {
+  background: #b5483a;
+  color: #fff;
+  border-color: #b5483a;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.mic-btn:disabled { opacity: 0.5; cursor: not-allowed; }
