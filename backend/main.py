@@ -40,7 +40,7 @@ async def websocket_chat(websocket: WebSocket):
                 role="user", content=user_text,
             ))
 
-            full_reply = await handle_turn(websocket, prior, user_text)
+            full_reply = await handle_turn(websocket, prior, user_text, USER_ID)
 
             await save_message(Message(
                 user_id=USER_ID, conversation_id=CONVERSATION_ID,

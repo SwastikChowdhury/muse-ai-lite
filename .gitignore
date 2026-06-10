@@ -13,3 +13,6 @@ dist/
 
 # Environment files
 .env
+
+# Vector store
+chroma_data/
