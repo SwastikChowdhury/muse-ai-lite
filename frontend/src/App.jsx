@@ -53,6 +53,7 @@ export default function App() {
       const data = JSON.parse(event.data);
       if (data.type === 'history') {
         setMessages(data.messages);
+        if (data.whispers) setWhispers(data.whispers);
       } else if (data.type === 'token') {
         replyRef.current += data.content;
         setMessages((prev) => {

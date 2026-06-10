@@ -5,3 +5,5 @@ google-genai
 motor
 dnspython
 chromadb
+groq
+python-multipart

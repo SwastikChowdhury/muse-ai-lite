@@ -9,7 +9,6 @@ QUOTA_MSG = (
     "Wait until the quota resets, or enable billing at ai.google.dev."
 )
 
-
 async def _stream_mentee_reply(websocket, history, user_message) -> str:
     """Stream Alex's reply; retry on transient errors, fall back on quota exhaustion."""
     for attempt in range(3):
@@ -66,4 +65,4 @@ async def handle_turn(websocket, history, user_message, user_id):
     # 3. Memory Agent (write) — remember this mentor message
     add_memory(user_id, user_message)
 
-    return full_reply
+    return full_reply, whisper
