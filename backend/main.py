@@ -2,11 +2,14 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 from groq import Groq
 
 from db import save_message, get_history, save_whisper, get_whispers
 from models import Message
 from orchestrator import handle_turn
+from metrics import active_ws
 
 load_dotenv()
 
@@ -19,6 +22,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prometheus: collect default HTTP metrics and expose GET /metrics
+Instrumentator().instrument(app).expose(app)
 
 groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
@@ -44,6 +50,7 @@ async def transcribe(audio: UploadFile = File(...)):
 @app.websocket("/ws")
 async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
+    active_ws.inc()
 
     history = await get_history(USER_ID, CONVERSATION_ID)
     whispers = await get_whispers(USER_ID, CONVERSATION_ID)
@@ -56,7 +63,7 @@ async def websocket_chat(websocket: WebSocket):
     try:
         while True:
             user_text = await websocket.receive_text()
-            prior = await get_history(USER_ID, CONVERSATION_ID)  # context before this turn
+            prior = await get_history(USER_ID, CONVERSATION_ID)
 
             await save_message(Message(
                 user_id=USER_ID, conversation_id=CONVERSATION_ID,
@@ -77,3 +84,11 @@ async def websocket_chat(websocket: WebSocket):
                 ))
     except WebSocketDisconnect:
         pass
+    finally:
+        active_ws.dec()
+
+
+# Serve the built frontend (only present in the Docker image, not local dev)
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="frontend")

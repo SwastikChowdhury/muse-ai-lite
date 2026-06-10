@@ -7,3 +7,4 @@ dnspython
 chromadb
 groq
 python-multipart
+prometheus-fastapi-instrumentator

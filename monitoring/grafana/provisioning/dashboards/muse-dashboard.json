@@ -1,0 +1,28 @@
+{
+    "title": "Muse — App Observability",
+    "uid": "muse-obs",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "5s",
+    "time": {"from": "now-15m", "to": "now"},
+    "panels": [
+      {
+        "id": 1, "title": "HTTP request rate (req/s)", "type": "timeseries",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total[1m]))"}]
+      },
+      {
+        "id": 2, "title": "Gemini calls by agent & outcome", "type": "timeseries",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [{"refId": "A", "expr": "sum by (agent, outcome) (muse_gemini_calls_total)", "legendFormat": "{{agent}} · {{outcome}}"}]
+      },
+      {
+        "id": 3, "title": "Agent latency p95 (s)", "type": "timeseries",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+        "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, agent) (rate(muse_agent_latency_seconds_bucket[5m])))", "legendFormat": "{{agent}}"}]
+      }
+    ]
+  }
