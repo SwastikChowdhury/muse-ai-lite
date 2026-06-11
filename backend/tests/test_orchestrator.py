@@ -23,7 +23,7 @@ def test_handle_turn_happy_path(monkeypatch):
     monkeypatch.setattr(orchestrator, "conversation_agent_stream",
                         lambda h, m: _chunks("Hello ", "there"))
     monkeypatch.setattr(orchestrator, "whisper_agent",
-                        lambda h, m, r, p: "Nice opening.")
+                        lambda h, m, r, p: ("Tone", "Nice opening."))
 
     full_reply, whisper = asyncio.run(
         orchestrator.handle_turn(ws, [], "Hi Alex", "demo-user")
@@ -43,7 +43,7 @@ def test_handle_turn_quota_exhausted(monkeypatch):
     def boom(h, m):
         raise Exception("429 RESOURCE_EXHAUSTED")
     monkeypatch.setattr(orchestrator, "conversation_agent_stream", boom)
-    monkeypatch.setattr(orchestrator, "whisper_agent", lambda h, m, r, p: "note")
+    monkeypatch.setattr(orchestrator, "whisper_agent", lambda h, m, r, p: ("Tone", "note"))
 
     full_reply, whisper = asyncio.run(orchestrator.handle_turn(ws, [], "Hi", "demo-user"))
 

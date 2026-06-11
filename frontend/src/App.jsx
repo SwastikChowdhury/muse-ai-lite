@@ -26,7 +26,7 @@ function speak(text) {
 
 export default function App() {
   const [messages, setMessages] = useState([]);
-  const [whispers, setWhispers] = useState([]);
+  const [whispers, setWhispers] = useState([]);   // { label, content }
   const [reflecting, setReflecting] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -45,7 +45,6 @@ export default function App() {
 
   useEffect(() => {
     const ws = new WebSocket('ws://localhost:8000/ws');
-
     ws.onerror = () => { setLoading(false); setReflecting(false); };
     ws.onclose = () => { setLoading(false); setReflecting(false); };
 
@@ -53,7 +52,9 @@ export default function App() {
       const data = JSON.parse(event.data);
       if (data.type === 'history') {
         setMessages(data.messages);
-        if (data.whispers) setWhispers(data.whispers);
+        if (data.whispers) {
+          setWhispers(data.whispers.map((c) => ({ label: 'Insight', content: c })));
+        }
       } else if (data.type === 'token') {
         replyRef.current += data.content;
         setMessages((prev) => {
@@ -70,7 +71,7 @@ export default function App() {
         replyRef.current = '';
       } else if (data.type === 'whisper') {
         setReflecting(false);
-        setWhispers((prev) => [...prev, data.content]);
+        setWhispers((prev) => [...prev, { label: data.label || 'Insight', content: data.content }]);
       }
     };
 
@@ -135,10 +136,8 @@ export default function App() {
     try {
       const res = await fetch('http://localhost:8000/transcribe', { method: 'POST', body: form });
       const data = await res.json();
-      console.log('Transcribe response:', data);
       const text = (data.text || '').trim();
       if (text) sendMessage(text);
-      else console.warn('Empty transcription — nothing sent');
     } catch (err) {
       console.error('Transcription request failed:', err);
     } finally {
@@ -149,8 +148,14 @@ export default function App() {
   return (
     <div className="app">
       <div className="conversation-panel">
-        <div className="panel-header">
-          <span>Practice Conversation</span>
+        <div className="chat-header">
+          <div className="contact">
+            <div className="avatar lg">A</div>
+            <div className="contact-meta">
+              <div className="contact-name">Alex</div>
+              <div className="contact-role">Mentee · practice partner</div>
+            </div>
+          </div>
           <button
             className="voice-toggle"
             onClick={() => { if (voiceOn) window.speechSynthesis.cancel(); setVoiceOn((v) => !v); }}
@@ -158,6 +163,7 @@ export default function App() {
             {voiceOn ? '🔊 Voice on' : '🔈 Voice off'}
           </button>
         </div>
+
         <div className="messages">
           {messages.map((msg, idx) => {
             const sp = SPEAKERS[msg.role] || SPEAKERS.assistant;
@@ -173,6 +179,7 @@ export default function App() {
           })}
           <div ref={messagesEndRef} />
         </div>
+
         <div className="input-area">
           <button
             className={`mic-btn ${recording ? 'recording' : ''}`}
@@ -187,7 +194,7 @@ export default function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={transcribing ? 'Transcribing…' : recording ? 'Listening…' : 'Respond as the mentor...'}
+            placeholder={transcribing ? 'Transcribing…' : recording ? 'Listening…' : 'Respond as the mentor…'}
             disabled={loading || recording || transcribing}
           />
           <button onClick={handleSend} disabled={loading || recording || transcribing}>Send</button>
@@ -195,19 +202,18 @@ export default function App() {
       </div>
 
       <div className="whisper-panel">
-        <div className="panel-header">✦ Muse</div>
+        <div className="muse-header">
+          <div className="muse-title">✦ Muse</div>
+          <div className="muse-sub">Private to you · the mentee can't see this</div>
+        </div>
         <div className="whispers">
           {whispers.length === 0 && !reflecting && (
-            <div className="whisper-empty">Muse is listening. Private coaching appears here after each exchange.</div>
+            <div className="whisper-empty">Muse is listening. Coaching appears here after each exchange.</div>
           )}
           {whispers.map((w, idx) => (
             <div key={idx} className="whisper-card">
-              <div className="whisper-label">Read Between the Lines</div>
-              <div className="whisper-route">
-                <span className="muse-mark">✦</span> Muse → Mentor
-                <span className="whisper-private">Private</span>
-              </div>
-              <div className="whisper-body">{renderWhisper(w)}</div>
+              <div className="whisper-tag">{w.label}</div>
+              <div className="whisper-body">{renderWhisper(w.content)}</div>
             </div>
           ))}
           {reflecting && (

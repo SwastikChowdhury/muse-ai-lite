@@ -1,4 +1,5 @@
 import os
+import re
 
 from dotenv import load_dotenv
 from google import genai
@@ -9,6 +10,11 @@ from model_registry import get_model
 
 load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+
+WHISPER_LABELS = [
+    "Tone", "Pattern", "Subtext", "Opening",
+    "Suggestion", "Pacing", "Clarity", "Empathy", "Boundary",
+]
 
 MENTEE_SYSTEM_PROMPT = """You are role-playing as a mentee in a practice mentoring conversation. \
 The person talking to you is your mentor, giving you feedback on a proposal you worked hard on. \
@@ -21,7 +27,12 @@ WHISPER_SYSTEM_PROMPT = """You are Muse, a perceptive and warm communication coa
 observe a practice conversation between a mentor (the person you advise) and a mentee. You speak \
 ONLY to the mentor, never to the mentee.
 
-After each exchange, give the mentor exactly ONE short coaching note (1-2 sentences) that:
+Begin your response with a category label on its own line, in exactly this format:
+LABEL: <one word>
+where <one word> is the single best fit from: Tone, Pattern, Subtext, Opening, Suggestion, \
+Pacing, Clarity, Empathy, Boundary.
+
+Then, on the following line, give the mentor exactly ONE short coaching note (1-2 sentences) that:
 - reads the mentee's emotional tone and any subtext beneath their words,
 - observes how the mentor's most recent message is landing,
 - suggests a concrete next move, optionally with a brief example phrasing in quotes.
@@ -31,8 +42,23 @@ If — and only if — you reference a recurring habit from a past session, cite
 e.g. "you're softening again [M1]". Never invent a past pattern that isn't in the notes. If no \
 notes are provided, coach only on the current exchange.
 
-Address the mentor as "you". Be specific and insightful, not generic. Output only the coaching \
-note — no preamble, no labels other than citations."""
+Address the mentor as "you". Be specific and insightful, not generic. After the LABEL line, \
+output only the coaching note — no preamble, no other labels except [Mn] citations."""
+
+LABEL_RE = re.compile(r"^\s*LABEL:\s*([A-Za-z]+)\s*\n?", re.IGNORECASE)
+
+
+def _parse_label(raw: str) -> tuple[str, str]:
+    """Split the model's 'LABEL: X\\n<note>' output into (label, note)."""
+    m = LABEL_RE.match(raw)
+    if not m:
+        return "Insight", raw.strip()
+    candidate = m.group(1)
+    text = raw[m.end():].strip()
+    for label in WHISPER_LABELS:
+        if candidate.lower() == label.lower():
+            return label, text or raw.strip()
+    return "Insight", text or raw.strip()
 
 
 def build_contents(history, user_message):
@@ -77,4 +103,4 @@ def whisper_agent(history, user_message, mentee_reply, past_patterns=None):
         config=types.GenerateContentConfig(system_instruction=WHISPER_SYSTEM_PROMPT),
     )
     record_usage("whisper", response.usage_metadata)
-    return response.text.strip()
+    return _parse_label(response.text.strip())

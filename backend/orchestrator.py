@@ -16,11 +16,9 @@ CITATION_RE = re.compile(r"\[M(\d+)\]")
 
 
 def verify_grounding(whisper: str, memories: list[str]) -> tuple[str, str]:
-    """Check the whisper's memory citations against what was actually retrieved.
-    Returns (possibly cleaned whisper, status)."""
     citations = CITATION_RE.findall(whisper)
     if not memories:
-        if citations:  # cited a memory when none were provided -> hallucinated
+        if citations:
             return CITATION_RE.sub("", whisper).strip(), "ungrounded"
         return whisper, "no_memory"
     if not citations:
@@ -65,18 +63,16 @@ async def _stream_mentee_reply(websocket, history, user_message) -> str:
 
 
 async def handle_turn(websocket, history, user_message, user_id):
-    """Coordinate the agents for one turn."""
-
     past_patterns = get_relevant_memories(user_id, user_message)
 
     full_reply = await _stream_mentee_reply(websocket, history, user_message)
     await websocket.send_json({"type": "done"})
 
-    whisper = None
+    whisper_label, whisper_text = "Insight", None
     start = time.perf_counter()
     for attempt in range(3):
         try:
-            whisper = whisper_agent(history, user_message, full_reply, past_patterns)
+            whisper_label, whisper_text = whisper_agent(history, user_message, full_reply, past_patterns)
             gemini_calls.labels(agent="whisper", outcome="ok").inc()
             break
         except Exception as e:
@@ -86,19 +82,21 @@ async def handle_turn(websocket, history, user_message, user_id):
                 gemini_calls.labels(agent="whisper", outcome="quota").inc()
             else:
                 gemini_calls.labels(agent="whisper", outcome="error").inc()
+            whisper_text = None
             await asyncio.sleep(1.5)
     agent_latency.labels(agent="whisper").observe(time.perf_counter() - start)
 
-    if whisper:
-        whisper, grounding_status = verify_grounding(whisper, past_patterns)
+    if whisper_text:
+        whisper_text, grounding_status = verify_grounding(whisper_text, past_patterns)
         whisper_grounding.labels(status=grounding_status).inc()
-        await websocket.send_json({"type": "whisper", "content": whisper})
+        await websocket.send_json({"type": "whisper", "content": whisper_text, "label": whisper_label})
     else:
         await websocket.send_json({
             "type": "whisper",
             "content": "Muse is momentarily busy (the model is under load) — try another exchange.",
+            "label": "Insight",
         })
 
     add_memory(user_id, user_message)
 
-    return full_reply, whisper
+    return full_reply, whisper_text
