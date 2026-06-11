@@ -1,20 +1,37 @@
 import asyncio
+import re
 import time
 
 from agents import conversation_agent_stream, whisper_agent
 from memory import add_memory, get_relevant_memories
-from metrics import gemini_calls, agent_latency
+from metrics import gemini_calls, agent_latency, whisper_grounding
 from llm_metrics import record_usage
 
 QUOTA_MSG = (
     "Sorry — I'm having trouble responding right now. "
-    "The AI service hit its daily free-tier limit (20 requests/day). "
-    "Wait until the quota resets, or enable billing at ai.google.dev."
+    "The AI service hit its rate limit. Please try again shortly."
 )
+
+CITATION_RE = re.compile(r"\[M(\d+)\]")
+
+
+def verify_grounding(whisper: str, memories: list[str]) -> tuple[str, str]:
+    """Check the whisper's memory citations against what was actually retrieved.
+    Returns (possibly cleaned whisper, status)."""
+    citations = CITATION_RE.findall(whisper)
+    if not memories:
+        if citations:  # cited a memory when none were provided -> hallucinated
+            return CITATION_RE.sub("", whisper).strip(), "ungrounded"
+        return whisper, "no_memory"
+    if not citations:
+        return whisper, "no_memory"
+    valid = all(1 <= int(c) <= len(memories) for c in citations)
+    if valid:
+        return CITATION_RE.sub("", whisper).strip(), "grounded"
+    return CITATION_RE.sub("", whisper).strip(), "ungrounded"
 
 
 async def _stream_mentee_reply(websocket, history, user_message) -> str:
-    """Stream Alex's reply; retry on transient errors, fall back on quota exhaustion."""
     for attempt in range(3):
         full_reply = ""
         usage = None
@@ -73,6 +90,8 @@ async def handle_turn(websocket, history, user_message, user_id):
     agent_latency.labels(agent="whisper").observe(time.perf_counter() - start)
 
     if whisper:
+        whisper, grounding_status = verify_grounding(whisper, past_patterns)
+        whisper_grounding.labels(status=grounding_status).inc()
         await websocket.send_json({"type": "whisper", "content": whisper})
     else:
         await websocket.send_json({

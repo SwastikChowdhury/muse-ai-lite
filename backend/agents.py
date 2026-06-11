@@ -1,8 +1,11 @@
 import os
+
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
 from llm_metrics import record_usage
+from model_registry import get_model
 
 load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
@@ -21,11 +24,15 @@ ONLY to the mentor, never to the mentee.
 After each exchange, give the mentor exactly ONE short coaching note (1-2 sentences) that:
 - reads the mentee's emotional tone and any subtext beneath their words,
 - observes how the mentor's most recent message is landing,
-- suggests a concrete next move, optionally with a brief example phrasing in quotes, and
-- if past-session notes are provided and you notice a recurring habit, gently point it out.
+- suggests a concrete next move, optionally with a brief example phrasing in quotes.
+
+GROUNDING RULE: you may be given numbered notes from past sessions, labeled [M1], [M2], etc. \
+If — and only if — you reference a recurring habit from a past session, cite its label inline, \
+e.g. "you're softening again [M1]". Never invent a past pattern that isn't in the notes. If no \
+notes are provided, coach only on the current exchange.
 
 Address the mentor as "you". Be specific and insightful, not generic. Output only the coaching \
-note — no preamble, no labels."""
+note — no preamble, no labels other than citations."""
 
 
 def build_contents(history, user_message):
@@ -37,21 +44,15 @@ def build_contents(history, user_message):
     return contents
 
 
-# Better for the demo (needs billing):
-#   "gemini-3.5-flash"            # $1.50 / $9.00  · near-Pro quality at Flash speed — best responses (Recommended)
-#   "gemini-3-flash"              # $0.50 / $3.00  · cheaper middle ground
-#   "gemini-2.5-flash"            # $0.30 / $2.50  · current
 def conversation_agent_stream(history, user_message):
     contents = build_contents(history, user_message)
     return client.models.generate_content_stream(
-        model="gemini-2.5-flash",
+        model=get_model("conversation"),
         contents=contents,
         config=types.GenerateContentConfig(system_instruction=MENTEE_SYSTEM_PROMPT),
     )
 
 
-#   "gemini-2.5-flash-lite"     # $0.10 / $0.40  · current
-#   "gemini-3.1-flash-lite"       # $0.25 / $1.50  · newer, very low latency (Recommended)
 def whisper_agent(history, user_message, mentee_reply, past_patterns=None):
     lines = []
     for m in history:
@@ -63,16 +64,17 @@ def whisper_agent(history, user_message, mentee_reply, past_patterns=None):
 
     memory_context = ""
     if past_patterns:
-        joined = "\n".join(f"- {p}" for p in past_patterns)
-        memory_context = f"\n\nNotes from this mentor's PAST sessions (look for recurring habits):\n{joined}"
+        joined = "\n".join(f"[M{i+1}] {p}" for i, p in enumerate(past_patterns))
+        memory_context = (
+            f"\n\nNumbered notes from this mentor's PAST sessions "
+            f"(cite [Mn] if you reference one):\n{joined}"
+        )
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=get_model("whisper"),
         contents=f"Conversation so far:\n\n{transcript}{memory_context}\n\n"
                  f"Give the mentor one short coaching note about the latest exchange.",
         config=types.GenerateContentConfig(system_instruction=WHISPER_SYSTEM_PROMPT),
     )
-    
     record_usage("whisper", response.usage_metadata)
-    
     return response.text.strip()

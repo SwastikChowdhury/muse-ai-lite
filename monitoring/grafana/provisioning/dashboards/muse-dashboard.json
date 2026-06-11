@@ -68,6 +68,22 @@
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"stacking": {"mode": "normal"}}}, "overrides": []},
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
       "targets": [{"refId": "A", "expr": "sum by (agent, kind) (muse_llm_tokens_total)", "legendFormat": "{{agent}} · {{kind}}"}]
+    },
+    {
+      "id": 9, "title": "Safety escalations", "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}, "colorMode": "value", "graphMode": "none"},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 28},
+      "targets": [{"refId": "A", "expr": "sum(muse_safety_escalations_total) or vector(0)"}]
+    },
+    {
+      "id": 10, "title": "Whisper grounding status", "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
+      "gridPos": {"h": 6, "w": 16, "x": 8, "y": 28},
+      "targets": [{"refId": "A", "expr": "sum by (status) (muse_whisper_grounding_total)", "legendFormat": "{{status}}"}]
     }
   ]
 }
