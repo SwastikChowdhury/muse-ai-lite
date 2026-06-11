@@ -1,3 +1,5 @@
+"""Test for the /transcribe endpoint with the Groq Whisper client stubbed out."""
+
 import io
 from types import SimpleNamespace
 
@@ -7,6 +9,12 @@ import main
 client = TestClient(main.app)
 
 def test_transcribe(monkeypatch):
+    """Uploaded audio is passed to the (mocked) STT client and its text is returned verbatim.
+
+    The nested SimpleNamespace mirrors the real client's
+    `groq_client.audio.transcriptions.create(...)` call chain so main.py needs
+    no changes; we assert only on the endpoint's response shape, not on Groq.
+    """
     fake_groq = SimpleNamespace(
         audio=SimpleNamespace(
             transcriptions=SimpleNamespace(

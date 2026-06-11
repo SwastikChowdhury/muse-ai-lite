@@ -2,6 +2,16 @@
 
 Single source of truth for which model each agent runs on,
 with version history and live rollback.
+
+Why this exists: model choice is an operational lever, not a code constant.
+agents.py asks `get_model(agent)` at call time, so flipping a model takes effect
+on the next turn with no redeploy. The /admin endpoints in main.py read this
+registry and trigger `rollback`, giving a fast "undo" if a newly promoted model
+regresses in production. State is in-memory, so changes reset on restart — fine
+for a demo, but a real deployment would back this with a datastore.
+
+NOTE: pricing/cost estimation lives in llm_metrics.py and must be kept in sync
+with the models chosen here.
 """
 
 REGISTRY = {
@@ -27,11 +37,25 @@ REGISTRY = {
 
 
 def get_model(agent: str) -> str:
+    """Return the model id an agent is currently running.
+
+    Called by agents.py on every LLM call, so it reflects live rollbacks. Raises
+    KeyError if `agent` isn't registered — intentional, since an unknown agent
+    key is a programming error, not a runtime condition to swallow.
+    """
     return REGISTRY[agent]["model"]
 
 
 def rollback(agent: str) -> dict:
-    """Swap an agent to its previous model. Returns the new state."""
+    """Swap an agent back to its previous model and bump the version. Returns new state.
+
+    The current and previous model ids are exchanged (so a second rollback acts
+    as a redo), and `version` is incremented to keep a monotonic change count.
+    Returns {"error": ...} when there's nothing to roll back to, which main.py
+    uses to decide whether to count the rollback metric.
+
+    Side effect: mutates REGISTRY in place (process-wide, in-memory state).
+    """
     entry = REGISTRY.get(agent)
     if not entry or not entry.get("previous"):
         return {"error": f"No previous model for agent '{agent}'"}

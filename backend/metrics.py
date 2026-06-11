@@ -1,3 +1,18 @@
+"""
+Prometheus metric definitions for operational visibility.
+
+Central registry of the custom metrics emitted across the backend (agent calls,
+latency, live connections, safety/grounding events, rollbacks). Defined once
+here and imported wherever they're incremented so there's a single source of
+truth for names/labels. Exposed at GET /metrics via the Instrumentator set up in
+main.py and scraped by Prometheus (see monitoring/). LLM token/cost metrics live
+separately in llm_metrics.py.
+
+Metric-type rationale: Counters for monotonically increasing event tallies,
+a Histogram for latency distributions, and a Gauge for a value that goes up and
+down (currently-open connections).
+"""
+
 from prometheus_client import Counter, Histogram, Gauge
 
 gemini_calls = Counter(

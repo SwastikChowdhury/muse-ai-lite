@@ -1,11 +1,36 @@
+/**
+ * App.jsx — the entire single-page UI for the Muse practice tool.
+ *
+ * Two-panel layout: a live chat with the AI "mentee" (left) and a private
+ * coaching "whisper" feed from Muse (right). This component is the frontend
+ * counterpart to backend/main.py's /ws endpoint and speaks its JSON protocol
+ * directly:
+ *   incoming  - {type:"history"|"token"|"done"|"whisper", ...}
+ *   outgoing  - raw text (the mentor's message)
+ *
+ * Responsibilities held here: WebSocket lifecycle, streaming-token assembly
+ * into the chat, optional voice input (mic -> /transcribe) and output
+ * (browser speech synthesis), and autoscroll. There is no router or global
+ * store — state is local because the app is intentionally one screen.
+ */
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
+// Display metadata per message role. `assistant` is the AI mentee ("Alex");
+// `user` is the human mentor. Used to label/avatar each bubble consistently.
 const SPEAKERS = {
   user: { name: 'You', sub: 'Mentor', initial: 'Y' },
   assistant: { name: 'Alex', sub: 'Mentee', initial: 'A' },
 };
 
+/**
+ * Render a whisper string with any "quoted" spans italicized.
+ *
+ * The coach often suggests example phrasing in quotes; we emphasize those so
+ * the mentor can spot the suggested wording at a glance. Splitting on a
+ * capturing regex keeps the quotes as their own array entries, and the React
+ * `key` is the index because the parts are positional and never reordered.
+ */
 function renderWhisper(text) {
   const parts = text.split(/(".*?")/g);
   return parts.map((part, i) =>
@@ -15,6 +40,12 @@ function renderWhisper(text) {
   );
 }
 
+/**
+ * Speak text aloud via the browser's SpeechSynthesis API (used when voice
+ * output is toggled on). Cancels any in-flight utterance first so replies
+ * don't queue up and overlap. No-ops when text is empty or the API is
+ * unavailable. Pitch is nudged slightly up to suit the mentee persona.
+ */
 function speak(text) {
   if (!text || !window.speechSynthesis) return;
   window.speechSynthesis.cancel();
@@ -27,35 +58,56 @@ function speak(text) {
 export default function App() {
   const [messages, setMessages] = useState([]);
   const [whispers, setWhispers] = useState([]);   // { label, content }
+  // True between a mentee reply finishing and its whisper arriving — drives the
+  // "Muse is reflecting…" indicator in the right panel.
   const [reflecting, setReflecting] = useState(false);
   const [input, setInput] = useState('');
+  // True while a turn is in flight; disables the composer so the user can't
+  // send a second message mid-stream.
   const [loading, setLoading] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const wsRef = useRef(null);
+  // Accumulates the streamed mentee reply across many token frames so the whole
+  // utterance can be spoken once on "done". A ref (not state) because it changes
+  // on every token and must not trigger re-renders.
   const replyRef = useRef('');
+  // Mirror of `voiceOn` readable inside the ws.onmessage closure. The effect
+  // that sets up the socket runs once, so it would otherwise capture the initial
+  // voiceOn value forever; this ref gives the handler the current setting.
   const voiceOnRef = useRef(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const messagesEndRef = useRef(null);
   const whispersEndRef = useRef(null);
 
+  // Keep the voice-on ref in sync with state for the long-lived ws handler.
   useEffect(() => { voiceOnRef.current = voiceOn; }, [voiceOn]);
 
+  // Open the chat socket once on mount and route inbound frames by type. Runs
+  // with an empty dep array so a single connection lives for the component's
+  // lifetime; the cleanup closes it on unmount.
   useEffect(() => {
     const ws = new WebSocket('ws://localhost:8000/ws');
+    // On any connection failure/close, clear the in-flight indicators so the UI
+    // doesn't hang on a spinner.
     ws.onerror = () => { setLoading(false); setReflecting(false); };
     ws.onclose = () => { setLoading(false); setReflecting(false); };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'history') {
+        // Rehydrate from server on connect. Persisted whispers arrive as plain
+        // strings (the label isn't stored), so default them to "Insight".
         setMessages(data.messages);
         if (data.whispers) {
           setWhispers(data.whispers.map((c) => ({ label: 'Insight', content: c })));
         }
       } else if (data.type === 'token') {
+        // Append each streamed chunk to both the spoken-text buffer and the last
+        // (assistant) bubble, which sendMessage pre-created as an empty
+        // placeholder — so tokens render in place as they arrive.
         replyRef.current += data.content;
         setMessages((prev) => {
           const updated = [...prev];
@@ -65,6 +117,9 @@ export default function App() {
           return updated;
         });
       } else if (data.type === 'done') {
+        // Mentee reply complete: stop the composer spinner, switch to the
+        // "reflecting" state while the whisper is computed, speak the full reply
+        // if voice is on, then reset the buffer for the next turn.
         setLoading(false);
         setReflecting(true);
         if (voiceOnRef.current) speak(replyRef.current);
@@ -79,9 +134,18 @@ export default function App() {
     return () => ws.close();
   }, []);
 
+  // Autoscroll each panel to its newest item. Whisper scroll also fires on
+  // `reflecting` so the "reflecting…" indicator stays in view.
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { whispersEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [whispers, reflecting]);
 
+  /**
+   * Send a mentor message over the socket and optimistically render it.
+   *
+   * Guards against empty input and double-sends while loading. Pushes the
+   * user's bubble plus an empty assistant bubble that the streaming `token`
+   * handler will fill in. Shared by both typed and voice-transcribed input.
+   */
   const sendMessage = (text) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
@@ -96,12 +160,22 @@ export default function App() {
     wsRef.current.send(trimmed);
   };
 
+  /** Send the current text input and clear the field (the typed-message path). */
   const handleSend = () => {
     if (!input.trim()) return;
     sendMessage(input);
     setInput('');
   };
 
+  /**
+   * Begin capturing mic audio for voice input.
+   *
+   * Buffers chunks via MediaRecorder; the actual upload happens in `onstop`
+   * (wired here) so recording and transcription are decoupled — the user
+   * controls when capture ends. On stop we release the mic tracks (otherwise
+   * the browser keeps the "recording" indicator lit) and hand the assembled
+   * WebM blob to transcribeAndSend. A denied/missing mic surfaces an alert.
+   */
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -122,6 +196,7 @@ export default function App() {
     }
   };
 
+  /** Stop the active recording, which triggers the recorder's onstop -> upload. */
   const stopRecording = () => {
     if (mediaRecorderRef.current && recording) {
       mediaRecorderRef.current.stop();
@@ -129,6 +204,14 @@ export default function App() {
     }
   };
 
+  /**
+   * Upload recorded audio to the backend /transcribe endpoint and, if it yields
+   * text, feed that text into the normal chat flow via sendMessage.
+   *
+   * `transcribing` gates the UI (composer disabled, placeholder updated) for the
+   * round-trip. Failures are logged but non-fatal — the user can simply retry or
+   * type instead. Always clears the transcribing flag in `finally`.
+   */
   const transcribeAndSend = async (blob) => {
     setTranscribing(true);
     const form = new FormData();

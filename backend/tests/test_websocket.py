@@ -1,8 +1,21 @@
+"""End-to-end test of the /ws frame protocol with DB and orchestrator stubbed.
+
+Verifies the transport contract main.py promises clients: a history frame on
+connect, then token/done/whisper frames per turn, and that a truthy whisper is
+persisted. All persistence and agent work is faked so the test is fast and
+network-free.
+"""
+
 from fastapi.testclient import TestClient
 import main
 
 
 def test_websocket_protocol(monkeypatch):
+    """Connect -> receive history -> send a message -> receive token/done/whisper in order.
+
+    Also asserts exactly one whisper is persisted, exercising main.py's
+    "only save truthy whispers" branch.
+    """
     async def fake_get_history(uid, cid):
         return []
 

@@ -1,3 +1,14 @@
+"""Pytest bootstrap, loaded automatically before any test collection.
+
+Two jobs, both of which must happen at import time (before test modules import
+the app):
+  1. Provide dummy values for required env vars so modules like agents.py and
+     db.py — which read os.environ at import — can be imported without real
+     credentials. setdefault means a real local .env still wins.
+  2. Put the backend/ directory on sys.path so tests can do bare imports such as
+     `from main import app` regardless of where pytest is invoked from.
+"""
+
 import os
 import sys
 
