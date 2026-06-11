@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from llm_metrics import record_usage
 
 load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
@@ -36,6 +37,10 @@ def build_contents(history, user_message):
     return contents
 
 
+# Better for the demo (needs billing):
+#   "gemini-3.5-flash"            # $1.50 / $9.00  · near-Pro quality at Flash speed — best responses (Recommended)
+#   "gemini-3-flash"              # $0.50 / $3.00  · cheaper middle ground
+#   "gemini-2.5-flash"            # $0.30 / $2.50  · current
 def conversation_agent_stream(history, user_message):
     contents = build_contents(history, user_message)
     return client.models.generate_content_stream(
@@ -45,6 +50,8 @@ def conversation_agent_stream(history, user_message):
     )
 
 
+#   "gemini-2.5-flash-lite"     # $0.10 / $0.40  · current
+#   "gemini-3.1-flash-lite"       # $0.25 / $1.50  · newer, very low latency (Recommended)
 def whisper_agent(history, user_message, mentee_reply, past_patterns=None):
     lines = []
     for m in history:
@@ -65,4 +72,7 @@ def whisper_agent(history, user_message, mentee_reply, past_patterns=None):
                  f"Give the mentor one short coaching note about the latest exchange.",
         config=types.GenerateContentConfig(system_instruction=WHISPER_SYSTEM_PROMPT),
     )
+    
+    record_usage("whisper", response.usage_metadata)
+    
     return response.text.strip()

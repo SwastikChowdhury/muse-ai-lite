@@ -4,6 +4,7 @@ import time
 from agents import conversation_agent_stream, whisper_agent
 from memory import add_memory, get_relevant_memories
 from metrics import gemini_calls, agent_latency
+from llm_metrics import record_usage
 
 QUOTA_MSG = (
     "Sorry — I'm having trouble responding right now. "
@@ -16,6 +17,7 @@ async def _stream_mentee_reply(websocket, history, user_message) -> str:
     """Stream Alex's reply; retry on transient errors, fall back on quota exhaustion."""
     for attempt in range(3):
         full_reply = ""
+        usage = None
         start = time.perf_counter()
         try:
             stream = conversation_agent_stream(history, user_message)
@@ -23,9 +25,12 @@ async def _stream_mentee_reply(websocket, history, user_message) -> str:
                 if chunk.text:
                     full_reply += chunk.text
                     await websocket.send_json({"type": "token", "content": chunk.text})
+                if getattr(chunk, "usage_metadata", None):
+                    usage = chunk.usage_metadata
             if full_reply:
                 gemini_calls.labels(agent="conversation", outcome="ok").inc()
                 agent_latency.labels(agent="conversation").observe(time.perf_counter() - start)
+                record_usage("conversation", usage)
                 return full_reply
         except Exception as e:
             err = str(e)

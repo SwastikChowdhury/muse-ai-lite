@@ -1,28 +1,73 @@
 {
-    "title": "Muse — App Observability",
-    "uid": "muse-obs",
-    "schemaVersion": 39,
-    "version": 1,
-    "refresh": "5s",
-    "time": {"from": "now-15m", "to": "now"},
-    "panels": [
-      {
-        "id": 1, "title": "HTTP request rate (req/s)", "type": "timeseries",
-        "datasource": {"type": "prometheus", "uid": "prometheus"},
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
-        "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total[1m]))"}]
-      },
-      {
-        "id": 2, "title": "Gemini calls by agent & outcome", "type": "timeseries",
-        "datasource": {"type": "prometheus", "uid": "prometheus"},
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-        "targets": [{"refId": "A", "expr": "sum by (agent, outcome) (muse_gemini_calls_total)", "legendFormat": "{{agent}} · {{outcome}}"}]
-      },
-      {
-        "id": 3, "title": "Agent latency p95 (s)", "type": "timeseries",
-        "datasource": {"type": "prometheus", "uid": "prometheus"},
-        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
-        "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, agent) (rate(muse_agent_latency_seconds_bucket[5m])))", "legendFormat": "{{agent}}"}]
-      }
-    ]
-  }
+  "title": "Muse — App Observability",
+  "uid": "muse-obs",
+  "schemaVersion": 39,
+  "version": 5,
+  "refresh": "5s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "title": "Total estimated spend", "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 6}, "overrides": []},
+      "options": {"reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}, "colorMode": "value", "graphMode": "area"},
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
+      "targets": [{"refId": "A", "expr": "sum(muse_llm_cost_usd_total)"}]
+    },
+    {
+      "id": 2, "title": "Total tokens", "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}, "colorMode": "value", "graphMode": "area"},
+      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
+      "targets": [{"refId": "A", "expr": "sum(muse_llm_tokens_total)"}]
+    },
+    {
+      "id": 3, "title": "Conversation turns", "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}, "colorMode": "value", "graphMode": "area"},
+      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
+      "targets": [{"refId": "A", "expr": "sum(muse_gemini_calls_total{agent=\"conversation\", outcome=\"ok\"})"}]
+    },
+    {
+      "id": 4, "title": "Tokens by agent & kind", "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [{"refId": "A", "expr": "sum by (agent, kind) (muse_llm_tokens_total)", "legendFormat": "{{agent}} · {{kind}}"}]
+    },
+    {
+      "id": 5, "title": "Estimated cost by agent (USD)", "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 6}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [{"refId": "A", "expr": "sum by (agent) (muse_llm_cost_usd_total)", "legendFormat": "{{agent}}"}]
+    },
+    {
+      "id": 6, "title": "Gemini calls by agent & outcome", "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "targets": [{"refId": "A", "expr": "sum by (agent, outcome) (muse_gemini_calls_total)", "legendFormat": "{{agent}} · {{outcome}}"}]
+    },
+    {
+      "id": 7, "title": "Avg latency by agent (s)", "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 2}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [{"refId": "A", "expr": "sum by (agent) (muse_agent_latency_seconds_sum) / sum by (agent) (muse_agent_latency_seconds_count)", "legendFormat": "{{agent}}"}]
+    },
+    {
+      "id": 8, "title": "Cumulative LLM tokens over session", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"stacking": {"mode": "normal"}}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+      "targets": [{"refId": "A", "expr": "sum by (agent, kind) (muse_llm_tokens_total)", "legendFormat": "{{agent}} · {{kind}}"}]
+    }
+  ]
+}
