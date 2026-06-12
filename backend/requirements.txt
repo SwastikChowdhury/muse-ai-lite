@@ -9,3 +9,5 @@ groq
 python-multipart
 prometheus-fastapi-instrumentator
 python-dotenv
+presidio-analyzer
+presidio-anonymizer

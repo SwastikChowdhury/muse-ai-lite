@@ -3,6 +3,8 @@
 All three are pure/deterministic functions, so these run without any LLM or DB.
 """
 
+import re
+
 from safety import check_safety
 from privacy import redact_pii
 from orchestrator import verify_grounding
@@ -20,10 +22,21 @@ def test_normal_message_passes():
 
 
 def test_pii_redaction():
-    """Email, phone, and SSN are all removed and replaced with typed placeholders."""
-    out = redact_pii("Email me at jo@x.com or call 412-555-1234, SSN 123-45-6789")
-    assert "jo@x.com" not in out and "412-555-1234" not in out and "123-45-6789" not in out
-    assert "[REDACTED_EMAIL]" in out and "[REDACTED_PHONE]" in out and "[REDACTED_SSN]" in out
+    """Email, phone, and SSN are detected and replaced with salted hash tokens.
+
+    Presidio finds the PII and each span is swapped for an irreversible "[<8 hex>]"
+    token. Raw values must not survive, and the same input must hash consistently.
+    """
+    # Use a realistic SSN: Presidio intentionally ignores well-known dummy SSNs
+    # (e.g. 123-45-6789, 078-05-1120) via UsSsnRecognizer.invalidate_result.
+    ssn = "457-55-5462"
+    text = f"Email me at jo@x.com or call 412-555-1234, SSN {ssn}"
+    out = redact_pii(text)
+    assert "jo@x.com" not in out and "412-555-1234" not in out and ssn not in out
+    # Tokens are 8 lowercase hex chars wrapped in brackets, e.g. "[a3f9b2c1]".
+    assert len(re.findall(r"\[[0-9a-f]{8}\]", out)) >= 3
+    # Deterministic: same input + same salt yields the same output.
+    assert redact_pii(text) == out
 
 
 def test_grounding_valid_citation():
