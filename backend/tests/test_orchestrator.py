@@ -40,11 +40,12 @@ def test_handle_turn_happy_path(monkeypatch):
     monkeypatch.setattr(orchestrator, "whisper_agent",
                         lambda h, m, r, p: ("Tone", "Nice opening."))
 
-    full_reply, whisper = asyncio.run(
+    full_reply, whisper_label, whisper = asyncio.run(
         orchestrator.handle_turn(ws, [], "Hi Alex", "demo-user")
     )
 
     assert full_reply == "Hello there"
+    assert whisper_label == "Tone"
     assert whisper == "Nice opening."
     types_sent = [p["type"] for p in ws.sent]
     assert "token" in types_sent and "done" in types_sent and "whisper" in types_sent
@@ -61,9 +62,10 @@ def test_handle_turn_quota_exhausted(monkeypatch):
     monkeypatch.setattr(orchestrator, "conversation_agent_stream", boom)
     monkeypatch.setattr(orchestrator, "whisper_agent", lambda h, m, r, p: ("Tone", "note"))
 
-    full_reply, whisper = asyncio.run(orchestrator.handle_turn(ws, [], "Hi", "demo-user"))
+    full_reply, whisper_label, whisper = asyncio.run(orchestrator.handle_turn(ws, [], "Hi", "demo-user"))
 
     assert "limit" in full_reply.lower()   # the graceful QUOTA_MSG, not a crash
+    assert whisper_label == "Tone"
     assert whisper == "note"
 
 
@@ -86,7 +88,7 @@ def test_handle_turn_whisper_failure_returns_none(monkeypatch):
         raise Exception("503 overloaded")
     monkeypatch.setattr(orchestrator, "whisper_agent", boom)
 
-    full_reply, whisper = asyncio.run(orchestrator.handle_turn(ws, [], "Hi", "demo-user"))
+    full_reply, whisper_label, whisper = asyncio.run(orchestrator.handle_turn(ws, [], "Hi", "demo-user"))
 
     assert full_reply == "ok"
     assert whisper is None   # so main.py won't persist a fallback note

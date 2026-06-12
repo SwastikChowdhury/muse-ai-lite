@@ -172,7 +172,7 @@ async def websocket_chat(websocket: WebSocket):
     await websocket.send_json({
         "type": "history",
         "messages": [{"role": m["role"], "content": m["content"]} for m in history],
-        "whispers": [w["content"] for w in whispers],
+        "whispers": [{"content": w["content"], "label": w.get("label") or "Insight"} for w in whispers],
     })
 
     try:
@@ -211,7 +211,7 @@ async def websocket_chat(websocket: WebSocket):
             # effect; it also returns the assembled values so we can persist
             # them here. Transport owns persistence, the orchestrator owns the
             # agents.
-            full_reply, whisper = await handle_turn(websocket, prior, user_text, USER_ID)
+            full_reply, whisper_label, whisper = await handle_turn(websocket, prior, user_text, USER_ID)
 
             await save_message(Message(
                 user_id=USER_ID, conversation_id=CONVERSATION_ID,
@@ -221,10 +221,12 @@ async def websocket_chat(websocket: WebSocket):
             # Only persist a whisper when the orchestrator actually produced
             # one. A None means the whisper agent failed/was skipped, in which
             # case we don't want to store the transient "Muse is busy" filler.
+            # The label (tone/category) is stored too so the side-panel can
+            # rehydrate each note with its original tag on reconnect.
             if whisper:
                 await save_whisper(Message(
                     user_id=USER_ID, conversation_id=CONVERSATION_ID,
-                    role="whisper", content=whisper,
+                    role="whisper", content=whisper, label=whisper_label,
                 ))
     except WebSocketDisconnect:
         # Normal client teardown (tab closed, navigation). Nothing to clean up

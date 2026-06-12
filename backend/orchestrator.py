@@ -152,10 +152,13 @@ async def handle_turn(websocket, history, user_message, user_id):
       user_message -- the mentor's latest message (already PII-redacted)
       user_id      -- whose memories to retrieve/extend
 
-    Returns (full_reply, whisper_text): the assembled mentee reply and the
-    cleaned coaching note (or None if the whisper agent ultimately failed).
-    main.py uses these to persist the turn; a None whisper is intentionally not
-    persisted so transient "model busy" filler never lands in history.
+    Returns (full_reply, whisper_label, whisper_text): the assembled mentee
+    reply, the coach's one-word tone/category for the note, and the cleaned
+    coaching note (or None if the whisper agent ultimately failed). main.py uses
+    these to persist the turn; a None whisper is intentionally not persisted so
+    transient "model busy" filler never lands in history. The label is returned
+    even on failure (it falls back to "Insight") but is only persisted alongside
+    a truthy whisper.
 
     Side effects: websocket frames, a vector-memory write, and metrics.
     """
@@ -212,4 +215,4 @@ async def handle_turn(websocket, history, user_message, user_id):
     # it can't influence retrieval for the turn that created it.
     add_memory(user_id, user_message)
 
-    return full_reply, whisper_text
+    return full_reply, whisper_label, whisper_text

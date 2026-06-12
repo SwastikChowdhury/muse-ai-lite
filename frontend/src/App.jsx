@@ -98,11 +98,12 @@ export default function App() {
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'history') {
-        // Rehydrate from server on connect. Persisted whispers arrive as plain
-        // strings (the label isn't stored), so default them to "Insight".
+        // Rehydrate from server on connect. Persisted whispers carry their
+        // original tone/category label; fall back to "Insight" for any older
+        // note saved before labels were stored.
         setMessages(data.messages);
         if (data.whispers) {
-          setWhispers(data.whispers.map((c) => ({ label: 'Insight', content: c })));
+          setWhispers(data.whispers.map((w) => ({ label: w.label || 'Insight', content: w.content })));
         }
       } else if (data.type === 'token') {
         // Append each streamed chunk to both the spoken-text buffer and the last

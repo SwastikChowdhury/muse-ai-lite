@@ -33,8 +33,8 @@ def test_websocket_protocol(monkeypatch):
     async def fake_handle_turn(ws, history, user_message, user_id):
         await ws.send_json({"type": "token", "content": "Hi"})
         await ws.send_json({"type": "done"})
-        await ws.send_json({"type": "whisper", "content": "coaching note"})
-        return "Hi", "coaching note"
+        await ws.send_json({"type": "whisper", "content": "coaching note", "label": "Tone"})
+        return "Hi", "Tone", "coaching note"
 
     monkeypatch.setattr(main, "get_history", fake_get_history)
     monkeypatch.setattr(main, "get_whispers", fake_get_whispers)
@@ -50,3 +50,4 @@ def test_websocket_protocol(monkeypatch):
         assert types_ == ["token", "done", "whisper"]
 
     assert len(saved_whispers) == 1   # whisper persisted because it was truthy
+    assert saved_whispers[0].label == "Tone"   # tone/category persisted alongside the note

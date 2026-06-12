@@ -39,9 +39,15 @@ class Message(BaseModel):
     "assistant" for the transcript, plus "whisper" for coaching notes (which are
     persisted in a separate collection but reuse this same model). `created_at`
     is the sort key used by db.get_history/get_whispers to replay turns in order.
+
+    `label` only applies to whispers: it's the coach's one-word tone/category for
+    the note (e.g. "Tone", "Pattern", "Empathy"; see agents.WHISPER_LABELS). It is
+    None for transcript messages so the UI can re-render a persisted whisper with
+    its original tag instead of defaulting everything to "Insight" on reconnect.
     """
     user_id: str
     conversation_id: str
     role: str  # "user" or "assistant"
     content: str
+    label: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

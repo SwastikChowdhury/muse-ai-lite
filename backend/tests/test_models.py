@@ -17,10 +17,11 @@ def test_message_serializes_for_mongo():
     Also documents that "whisper" is a valid role on the same model, since
     whispers are persisted through this schema too.
     """
-    m = Message(user_id="u1", conversation_id="c1", role="whisper", content="note")
+    m = Message(user_id="u1", conversation_id="c1", role="whisper", content="note", label="Tone")
     doc = m.model_dump()
     assert doc["role"] == "whisper"
     assert doc["content"] == "note"
+    assert doc["label"] == "Tone"   # tone/category persisted with the whisper
     assert "created_at" in doc
 
 
