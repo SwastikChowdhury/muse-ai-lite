@@ -23,8 +23,7 @@ Muse-lite is a multi-agent conversational system built around a split-screen exp
 
 The system streams token-by-token over WebSockets, remembers your communication habits across sessions via vector retrieval, and is fully instrumented for cost, latency, and safety.
 
-> _Add a screenshot at `docs/screenshot.png` to show the split-screen UI here._
-> `![Muse-lite UI](docs/screenshot.png)`
+> ![Muse-lite UI](docs/screenshot.png)
 
 ## Features
 
