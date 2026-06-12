@@ -8,3 +8,4 @@ chromadb
 groq
 python-multipart
 prometheus-fastapi-instrumentator
+python-dotenv
