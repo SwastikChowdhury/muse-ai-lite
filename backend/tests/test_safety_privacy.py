@@ -71,6 +71,13 @@ def test_pii_redaction():
     assert redact_pii(text) == out
 
 
+def test_pii_redaction_preserves_names_and_dates():
+    """Names, dates, and non-PII tokens are not redacted — coaching context stays readable."""
+    text = "Alex, meet Sarah next Tuesday about the Q3 report."
+    out = redact_pii(text)
+    assert "Alex" in out and "Sarah" in out and "next Tuesday" in out and "Q3" in out
+
+
 def test_grounding_valid_citation(monkeypatch):
     """A citation pointing to a real memory is 'grounded' and the [Mn] marker is stripped.
 

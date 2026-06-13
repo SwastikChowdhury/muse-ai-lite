@@ -1,11 +1,13 @@
-"""PII pseudonymization. Applied at intake — raw PII never reaches the LLM, MongoDB, or the vector store.
+"""PII pseudonymization. Applied at intake — raw high-risk PII never reaches the LLM, MongoDB, or the vector store.
 
-Detection happens at the very front of the turn in main.py, so the scrubbed text
+Detection happens at the very front of the turn in chat.py, so the scrubbed text
 is what everything downstream sees: it's persisted, embedded into memory, and
-sent to Gemini. Microsoft Presidio's local NER/recognizers find PII entities, and
-each detected value is replaced with a short, salted HMAC-SHA256 token instead of a
-generic placeholder. This is deterministic (same input + same salt => same token)
-so references stay linkable across turns, while remaining unreadable and irreversible.
+sent to Gemini. Presidio's local recognizers scan only high-risk entity types
+(see PII_ENTITIES); names, dates, and locations are intentionally preserved for
+coaching context. Each detected high-risk span is replaced with a short, salted
+HMAC-SHA256 token instead of a generic placeholder. This is deterministic (same
+input + same salt => same token) so references stay linkable across turns, while
+remaining unreadable and irreversible.
 """
 
 import hashlib
@@ -34,6 +36,20 @@ if PII_SALT == _DEFAULT_SALT:
 
 _SALT_BYTES = PII_SALT.encode("utf-8")
 
+# High-risk PII only — names, dates, and locations are not redacted so coaching
+# context stays readable in chat and on history replay.
+PII_ENTITIES = [
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER",
+    "US_SSN",
+    "CREDIT_CARD",
+    "US_BANK_NUMBER",
+    "IBAN_CODE",
+    "IP_ADDRESS",
+    "US_PASSPORT",
+    "US_ITIN",
+]
+
 # Initialize the Presidio engines once at import time — loading the spaCy model
 # is expensive and must not happen per call. The anonymizer is reused so that
 # overlapping detections (e.g. an email that also matches a URL) are resolved by
@@ -53,17 +69,18 @@ def _hash_pii(value: str) -> str:
 
 
 def redact_pii(text: str) -> str:
-    """Replace each detected PII span with a short salted hash token.
+    """Replace each detected high-risk PII span with a short salted hash token.
 
-    Presidio detects PII entities locally and the anonymizer applies a custom
-    operator that swaps each span for an irreversible "[<8 hex>]" token. Using the
-    anonymizer (rather than manual slicing) lets Presidio resolve overlapping
-    detections. Same input + same salt always yields the same token.
+    Only entity types in PII_ENTITIES are scanned; names, dates, and locations
+    pass through unchanged. The anonymizer applies a custom operator that swaps
+    each span for an irreversible "[<8 hex>]" token. Using the anonymizer (rather
+    than manual slicing) lets Presidio resolve overlapping detections. Same input
+    + same salt always yields the same token.
     """
     if not text:
         return text
 
-    results = _analyzer.analyze(text=text, language="en")
+    results = _analyzer.analyze(text=text, language="en", entities=PII_ENTITIES)
     if not results:
         return text
 
