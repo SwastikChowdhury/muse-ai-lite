@@ -5,9 +5,11 @@ All three are pure/deterministic functions, so these run without any LLM or DB.
 
 import re
 
+import grounding
 from safety import check_safety
 from privacy import redact_pii
 from orchestrator import verify_grounding
+from grounding import verify_claim
 
 
 def test_crisis_message_escalates():
@@ -59,8 +61,14 @@ def test_pii_redaction():
     assert redact_pii(text) == out
 
 
-def test_grounding_valid_citation():
-    """A citation pointing to a real memory is 'grounded' and the [Mn] marker is stripped."""
+def test_grounding_valid_citation(monkeypatch):
+    """A citation pointing to a real memory is 'grounded' and the [Mn] marker is stripped.
+
+    Stage 1 (range) passes here, so verify_grounding now runs the Stage 2
+    semantic check. We stub it to 'grounded' to keep this test focused on the
+    structural path + marker stripping (no real model calls).
+    """
+    monkeypatch.setattr("orchestrator.verify_claim", lambda claim, memory: "grounded")
     text, status = verify_grounding("You're softening again [M1].", ["past note"])
     assert status == "grounded" and "[M1]" not in text
 
@@ -75,3 +83,78 @@ def test_grounding_cited_with_no_memories():
     """Citing any memory when none were provided is 'ungrounded' — a clear hallucination."""
     _, status = verify_grounding("Like last time [M1].", [])
     assert status == "ungrounded"
+
+
+def test_grounding_combined_citation_is_stripped_and_verified(monkeypatch):
+    """A combined "[M1, M2]" bracket is stripped AND routed through verify_claim.
+
+    Regression test: the old single-index regex left combined markers in the
+    displayed note and skipped grounding entirely (mislabeled 'no_memory').
+    """
+    calls = []
+    monkeypatch.setattr(
+        "orchestrator.verify_claim",
+        lambda claim, memory: calls.append(memory) or "grounded",
+    )
+    text, status = verify_grounding(
+        "You are recycling vague feedback [M1, M2] again.",
+        ["softens feedback", "avoids specifics"],
+    )
+    assert status == "grounded"
+    assert "M1" not in text and "M2" not in text and "[" not in text
+    # Both cited indices were verified against their respective memories.
+    assert calls == ["softens feedback", "avoids specifics"]
+
+
+def test_grounding_combined_out_of_range_is_ungrounded():
+    """An index inside a combined bracket that's out of range is 'ungrounded'."""
+    text, status = verify_grounding("As we saw [M1, M3].", ["only one memory"])
+    assert status == "ungrounded" and "M3" not in text
+
+
+def test_grounding_strips_orphaned_whitespace(monkeypatch):
+    """Stripping a mid-sentence marker leaves no double space or space-before-period."""
+    monkeypatch.setattr("orchestrator.verify_claim", lambda claim, memory: "grounded")
+    text, _ = verify_grounding("This pattern was seen in [M1].", ["a past pattern"])
+    assert text == "This pattern was seen in."
+
+
+def _fake_nli(label: str, score: float):
+    """Build a stub matching the zero-shot pipeline's output shape.
+
+    The pipeline returns labels sorted by score descending; _nli_check reads
+    labels[0] / scores[0], so we just put the chosen label first.
+    """
+    def _call(*args, **kwargs):
+        return {"labels": [label], "scores": [score]}
+    return _call
+
+
+def test_verify_claim_clear_entailment(monkeypatch):
+    """DeBERTa returns high-confidence entailment → grounded, no LLM call."""
+    monkeypatch.setattr(grounding, "nli", _fake_nli("entailment", 0.97))
+
+    def _boom(claim, memory):
+        raise AssertionError("LLM judge should not be called on a clear case")
+
+    monkeypatch.setattr(grounding, "_llm_judge", _boom)
+    assert verify_claim("you keep softening feedback", "mentor retreats from criticism") == "grounded"
+
+
+def test_verify_claim_clear_contradiction(monkeypatch):
+    """DeBERTa returns high-confidence contradiction → ungrounded, no LLM call."""
+    monkeypatch.setattr(grounding, "nli", _fake_nli("contradiction", 0.95))
+
+    def _boom(claim, memory):
+        raise AssertionError("LLM judge should not be called on a clear case")
+
+    monkeypatch.setattr(grounding, "_llm_judge", _boom)
+    assert verify_claim("you always interrupt the mentee", "mentor gives detailed code feedback") == "ungrounded"
+
+
+def test_verify_claim_ambiguous_falls_back_to_llm(monkeypatch):
+    """DeBERTa is uncertain → LLM judge called, returns its verdict."""
+    # Low-confidence neutral: below CONFIDENCE_THRESHOLD, so it escalates.
+    monkeypatch.setattr(grounding, "nli", _fake_nli("neutral", 0.40))
+    monkeypatch.setattr(grounding, "_llm_judge", lambda claim, memory: "grounded")
+    assert verify_claim("a borderline coaching note", "an ambiguous past pattern") == "grounded"

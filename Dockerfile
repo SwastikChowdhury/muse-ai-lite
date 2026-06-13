@@ -10,7 +10,12 @@
     FROM python:3.10-slim AS app
     WORKDIR /app
     COPY backend/requirements.txt ./
-    RUN pip install --no-cache-dir -r requirements.txt
+    # CPU-only torch (the default Linux wheel bundles multi-GB CUDA deps this
+    # image can't use) + a BuildKit pip cache so rebuilds reuse downloaded wheels
+    # instead of re-fetching the whole ML stack every time.
+    RUN --mount=type=cache,target=/root/.cache/pip \
+        pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements.txt
     COPY backend/ ./
     COPY --from=frontend /frontend/dist ./static
     EXPOSE 8000

@@ -31,6 +31,7 @@ import re
 import time
 
 from agents import conversation_agent_stream, whisper_agent
+from grounding import verify_claim
 from memory import add_memory, get_relevant_memories
 from metrics import gemini_calls, agent_latency, whisper_grounding, moderation_flags, record_dominant_emotion
 from llm_metrics import record_usage
@@ -52,44 +53,85 @@ QUOTA_MSG = (
     "The AI service hit its rate limit. Please try again shortly."
 )
 
-# Captures the numeric index of memory citations like "[M2]" the whisper agent
-# may emit. Used both to validate and to strip them.
-CITATION_RE = re.compile(r"\[M(\d+)\]")
+# Matches an entire memory-citation bracket the whisper agent may emit. Handles
+# both the single form ("[M2]") and the combined form ("[M1, M2]") — the model
+# sometimes groups several indices into one bracket, and an earlier single-index
+# pattern silently left those combined markers in the displayed note. INDEX_RE
+# then pulls the numeric indices back out of a matched bracket.
+CITATION_RE = re.compile(r"\[M\d+(?:\s*,\s*M?\d+)*\]")
+INDEX_RE = re.compile(r"\d+")
+
+
+def _citation_indices(whisper: str) -> list[int]:
+    """Every memory index cited anywhere in `whisper`, across single and combined
+    brackets — e.g. "[M1] ... [M2, M3]" -> [1, 2, 3]."""
+    indices: list[int] = []
+    for bracket in CITATION_RE.findall(whisper):
+        indices.extend(int(n) for n in INDEX_RE.findall(bracket))
+    return indices
+
+
+def _strip_citations(whisper: str) -> str:
+    """Remove all [Mn] / [M1, M2] markers and tidy the leftover spacing.
+
+    Removing a mid-sentence marker leaves artifacts like "seen in  ." (a double
+    space) or "evidence ." (a space before punctuation); we pull punctuation back
+    against the preceding word and collapse repeated whitespace so the cleaned
+    note reads naturally.
+    """
+    text = CITATION_RE.sub("", whisper)
+    text = re.sub(r"\s+([.,;:!?])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
 
 
 def verify_grounding(whisper: str, memories: list[str]) -> tuple[str, str]:
     """Validate the whisper's [Mn] memory citations and strip them for display.
 
-    This is the anti-hallucination check for memory recall: the whisper agent is
-    only allowed to cite a past pattern that was actually provided to it. Here we
-    confirm every [Mn] index points to a real entry in `memories` (1-indexed to
-    match the [M1], [M2]... numbering built in agents.whisper_agent).
+    Two-stage anti-hallucination check for memory recall:
+
+      Stage 1 — structural: every [Mn] index must point to a real entry in
+        `memories` (1-indexed to match the [M1], [M2]... numbering built in
+        agents.whisper_agent). A cheap, deterministic range check.
+      Stage 2 — semantic: even a valid index can be mischaracterized, so for each
+        in-range citation we run grounding.verify_claim() to confirm the note
+        actually reflects the cited memory's content (DeBERTa NLI, with an LLM
+        judge fallback for ambiguous cases).
 
     The [Mn] markers are always stripped from the returned text — they're an
     internal grounding signal, not something the mentor should see.
 
     Returns (cleaned_text, status) where status feeds the whisper_grounding
     metric and is one of:
-      - "grounded":   citations present and all valid
-      - "ungrounded": citations present but at least one is invalid/hallucinated
-                      (or cited when no memories existed at all)
+      - "grounded":   citations present, all in range, and all semantically
+                      consistent with the memory they cite
+      - "ungrounded": at least one citation is out of range (Stage 1) or
+                      mischaracterizes its memory (Stage 2), or the agent cited
+                      a memory when none existed at all
       - "no_memory":  no citations, treated as the agent coaching only on the
                       current exchange (the expected, non-error case)
     """
-    citations = CITATION_RE.findall(whisper)
+    indices = _citation_indices(whisper)
+    cleaned = _strip_citations(whisper)
     if not memories:
         # The agent cited something despite having no memories to draw on — a
         # clear hallucination. Scrub the bogus markers before returning.
-        if citations:
-            return CITATION_RE.sub("", whisper).strip(), "ungrounded"
-        return whisper, "no_memory"
-    if not citations:
-        return whisper, "no_memory"
-    # Every citation index must fall within the provided memory list.
-    valid = all(1 <= int(c) <= len(memories) for c in citations)
-    if valid:
-        return CITATION_RE.sub("", whisper).strip(), "grounded"
-    return CITATION_RE.sub("", whisper).strip(), "ungrounded"
+        if indices:
+            return cleaned, "ungrounded"
+        return cleaned, "no_memory"
+    if not indices:
+        return cleaned, "no_memory"
+    # Stage 1 — structural: every citation index must fall within the list.
+    if not all(1 <= i <= len(memories) for i in indices):
+        return cleaned, "ungrounded"
+    # Stage 2 — semantic: confirm each cited memory actually backs the note.
+    # The claim we verify is the note WITHOUT the [Mn] markers (the markers are
+    # plumbing, not part of the assertion being grounded).
+    for i in indices:
+        cited_memory = memories[i - 1]
+        if verify_claim(cleaned, cited_memory) == "ungrounded":
+            return cleaned, "ungrounded"
+    return cleaned, "grounded"
 
 
 async def _stream_mentee_reply(websocket, history, user_message) -> str:

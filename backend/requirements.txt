@@ -13,3 +13,4 @@ presidio-analyzer
 presidio-anonymizer
 transformers
 torch
+sentence-transformers

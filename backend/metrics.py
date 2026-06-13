@@ -43,6 +43,11 @@ whisper_grounding = Counter(
     ["status"],  # grounded | ungrounded | no_memory
 )
 
+grounding_llm_judge_calls = Counter(
+    "muse_grounding_llm_judge_total",
+    "Times the LLM judge was called as fallback in grounding verification",
+)
+
 model_rollbacks = Counter(
     "muse_model_rollbacks_total",
     "Live model rollbacks by agent",
