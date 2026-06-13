@@ -7,10 +7,12 @@ the app):
      credentials. setdefault means a real local .env still wins.
   2. Put the backend/ directory on sys.path so tests can do bare imports such as
      `from main import app` regardless of where pytest is invoked from.
+  3. Stub chromadb so importing the app never touches a on-disk vector store.
 """
 
 import os
 import sys
+from unittest.mock import MagicMock
 
 os.environ.setdefault("GEMINI_API_KEY", "test")
 os.environ.setdefault("GROQ_API_KEY", "test")
@@ -28,3 +30,11 @@ os.environ.setdefault("GOOGLE_CLIENT_ID", "test")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test")
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+if "chromadb" not in sys.modules:
+    _chroma = MagicMock()
+    _collection = MagicMock()
+    _client = MagicMock()
+    _client.get_or_create_collection.return_value = _collection
+    _chroma.PersistentClient.return_value = _client
+    sys.modules["chromadb"] = _chroma

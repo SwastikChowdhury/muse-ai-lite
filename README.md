@@ -36,45 +36,50 @@ The system streams token-by-token over WebSockets, remembers your communication 
 - **Safety & privacy** — a crisis-escalation filter that bypasses the model entirely, plus PII redaction applied at intake (before the LLM, the database, or the vector store).
 - **Evaluation harness** — offline test cases (safety, privacy, grounding) in CI, plus a live eval runner that scores empathy and recall through the real pipeline.
 - **Full observability** — Prometheus + Grafana dashboards tracking tokens, estimated cost, per-agent latency, quota pressure, grounding, and safety escalations.
+- **Authentication** — email/password registration, JWT access tokens, refresh tokens in Postgres, and optional Google OAuth. Chat WebSocket requires a valid access token; each user's history, whispers, and vector memories are scoped by `user_id`.
 - **Containerized & CI-tested** — one Docker image serves the whole app; GitHub Actions lints, tests, smoke-tests the container, and publishes to GHCR.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Client["React + Vite client"]
-        UI["Chat · Muse coaching panel"]
-        Mic["Mic / spoken replies"]
+    subgraph client [React client]
+        UI[Chat and Muse panel]
+        Mic[Microphone]
     end
 
-    subgraph Server["FastAPI + Uvicorn"]
-        WS["WebSocket /ws"]
-        GATE["Intake gate<br/>PII redaction · safety filter"]
-        ORC["Orchestrator"]
-        CONV["Conversation Agent"]
-        MUSE["Muse Whisper Agent<br/>+ grounding check"]
-        MEM["Memory Agent"]
-        TR["/transcribe"]
-        REG["Model registry"]
+    subgraph backend [FastAPI backend]
+        AUTH[Auth and JWT]
+        WS[WebSocket]
+        GATE[Safety and PII gate]
+        ORC[Orchestrator]
+        CONV[Conversation agent]
+        WHISPER[Whisper agent]
+        MEM[Memory agent]
+        TR[Transcribe]
+        REG[Model registry]
+        METRICS[Metrics endpoint]
     end
 
-    Gemini["Google Gemini (tiered models)"]
-    Groq["Groq Whisper (ASR)"]
-    Mongo[("MongoDB Atlas")]
-    Chroma[("ChromaDB vectors")]
-    Prom[("Prometheus")]
-    Graf["Grafana"]
+    Postgres[(Postgres)]
+    Mongo[(MongoDB)]
+    Chroma[(ChromaDB)]
+    Gemini[Gemini API]
+    Groq[Groq API]
+    Prometheus[(Prometheus)]
+    Grafana[Grafana]
 
-    UI <-->|history / tokens / whispers| WS
-    Mic -->|audio| TR --> Groq
+    UI -->|access token| WS
+    Mic --> TR --> Groq
+    AUTH --> Postgres
     WS --> GATE --> ORC
     ORC --> CONV --> Gemini
-    ORC --> MUSE --> Gemini
+    ORC --> WHISPER --> Gemini
     ORC --> MEM --> Chroma
-    REG -. model per agent .-> CONV
-    REG -. model per agent .-> MUSE
-    ORC -->|persist turns + whispers| Mongo
-    Server -. scrape /metrics .-> Prom --> Graf
+    ORC --> Mongo
+    REG -.-> CONV
+    REG -.-> WHISPER
+    METRICS -.-> Prometheus --> Grafana
 ```
 
 ### Request lifecycle (one turn)
@@ -91,11 +96,12 @@ Conversation turns and coaching notes are stored in **separate MongoDB collectio
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React + Vite (built and served by FastAPI in production) |
+| Frontend | React + Vite (auth gate + chat; built and served by FastAPI in production) |
 | Backend | FastAPI + Uvicorn, async WebSockets |
+| Auth | Postgres (SQLAlchemy async) · JWT access tokens · refresh tokens · Google OAuth |
 | LLM | Google Gemini, tiered per agent (registry-driven) |
-| Persistence | MongoDB Atlas (Motor async driver) |
-| Vector memory | ChromaDB (local, persistent) |
+| Persistence | MongoDB Atlas (transcripts, whispers) · Postgres (users, sessions) |
+| Vector memory | ChromaDB (local, persistent; scoped per `user_id`) |
 | Voice | Groq Whisper (ASR) · browser SpeechSynthesis (TTS) |
 | Observability | Prometheus + Grafana |
 | Packaging / CI | Docker · GitHub Actions · GHCR |
@@ -104,35 +110,58 @@ Conversation turns and coaching notes are stored in **separate MongoDB collectio
 
 ### Prerequisites
 
-- Docker & Docker Compose (for the full stack), or Python 3.10 + Node 20 for local dev
-- A MongoDB Atlas connection string, a Google Gemini API key, and a Groq API key
+- Docker & Docker Compose (recommended — includes Postgres), or Python 3.10 + Node 20 for local dev
+- MongoDB Atlas connection string, Google Gemini API key, and Groq API key
+- For Google sign-in: OAuth client credentials and callback URI `http://localhost:8000/auth/google/callback`
 
 ### Configuration
 
-Create `backend/.env` (values **unquoted**):
+Copy the example env file and fill in your values (never commit `backend/.env`):
+
+```bash
+cp backend/.env.example backend/.env
+```
 
 | Variable | Description |
 | --- | --- |
 | `GEMINI_API_KEY` | Google Gemini API key (billing-enabled recommended) |
-| `MONGODB_URI` | MongoDB Atlas connection string |
+| `MONGODB_URI` | MongoDB Atlas connection string (chat data) |
 | `GROQ_API_KEY` | Groq API key (Whisper speech-to-text) |
+| `POSTGRES_URI` | Postgres async URL for auth (`postgresql+asyncpg://user:pass@host:5432/db`) |
+| `JWT_SECRET` | Long random string for signing access tokens (required in production) |
+| `JWT_ALGORITHM` | JWT algorithm (default `HS256`) |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime (default `15`) |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifetime (default `7`) |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID (optional) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (optional) |
+| `FRONTEND_URL` | OAuth redirect target (`http://localhost:5173` for Vite dev, `http://localhost:8000` under Docker) |
+| `PII_SALT` | Salt for PII tokenization (set a strong value in production) |
+| `SUICIDE_THRESHOLD` | Suicide-model escalation threshold |
+| `CRISIS_THRESHOLD` | Crisis emotion proxy threshold |
+| `TOXIC_THRESHOLD` | Toxicity flag threshold |
+
+Docker Compose starts Postgres automatically and overrides `POSTGRES_URI` and `FRONTEND_URL` for the app container. See `backend/.env.example` for the full list.
 
 ### Run the full stack (recommended)
 
-Brings up the app, Prometheus, and Grafana together:
+Brings up the app, Postgres, Prometheus, and Grafana together:
 
 ```bash
 docker compose up --build
-# app        -> http://localhost:8000
+# app        -> http://localhost:8000   (SPA + API; sign in / register first)
+# Postgres   -> localhost:5432          (user muse / password muse / db muse)
 # Prometheus -> http://localhost:9090
 # Grafana    -> http://localhost:3000   (anonymous access; Muse dashboard provisioned)
 ```
 
 ### Run for local development
 
+Start Postgres (e.g. `docker compose up postgres` or local install), then:
+
 Backend (from `backend/`):
 
 ```bash
+cp .env.example .env   # if you haven't already
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
@@ -142,8 +171,10 @@ Frontend (from `frontend/`):
 
 ```bash
 npm install
-npm run dev        # Vite dev server on :5173
+npm run dev        # Vite dev server on :5173 (set FRONTEND_URL=http://localhost:5173 in .env)
 ```
+
+The frontend calls `http://localhost:8000` for API/auth; chat WebSocket connects with `?token=<access_token>`.
 
 ## Project structure
 
@@ -164,6 +195,7 @@ muse-ai-lite/
 │   │   ├── observability/        # metrics.py, llm_metrics.py, model_registry.py
 │   │   └── schemas/              # Pydantic models
 │   ├── conftest.py               # pytest path / env setup
+│   ├── .env.example              # env var template (copy to .env)
 │   ├── requirements.txt
 │   ├── tests/                    # pytest suite (runs in CI)
 │   └── evals/                    # live evaluation harness
@@ -175,7 +207,7 @@ muse-ai-lite/
 │       └── datasources/      # datasource.yml
 ├── .github/workflows/ci.yml  # lint · test · build · smoke-test · publish
 ├── Dockerfile                # multi-stage: build frontend, serve from FastAPI
-├── docker-compose.yml        # app + Prometheus + Grafana
+├── docker-compose.yml        # app + postgres + Prometheus + Grafana
 ├── .dockerignore
 ├── LICENSE
 └── README.md
@@ -209,11 +241,22 @@ cd backend
 pytest tests -q
 ```
 
-It covers the data models and Mongo serialization, the HTTP and WebSocket endpoints, the orchestrator's resilience paths (quota fallback, whisper failure), grounding verification, and the safety/PII filters. A separate live harness exercises the real agents:
+It covers auth-aware WebSocket wiring, data models, the orchestrator's resilience paths, grounding verification, and safety/PII filters. A separate live harness exercises the real agents:
 
 ```bash
 python -m evals.run_eval     # makes real Gemini calls
 ```
+
+### Manual smoke test (auth + chat)
+
+1. `curl http://localhost:8000/health` → `{"status":"ok"}`
+2. Open the app → auth screen (Sign In / Create Account)
+3. Register or log in → chat shows your first name as Mentor
+4. Send a message → mentee reply + Muse whisper
+5. Refresh → still logged in; history reloads
+6. Log out → auth screen; log in again → same conversation history
+
+Optional: query Postgres users — `docker compose exec postgres psql -U muse -d muse -c "SELECT email, first_name FROM users;"` (run from repo root).
 
 ## Observability
 
@@ -227,6 +270,14 @@ The backend exposes Prometheus metrics at `/metrics`, including app-specific ser
 
 Grafana ships with a provisioned dashboard (spend, tokens, latency, calls, grounding, safety), brought up automatically by `docker compose`.
 
+## Security notes
+
+- **Never commit `backend/.env`** — it is gitignored; use `backend/.env.example` as the template.
+- **JWT_SECRET** must be a strong random value in any shared or production deployment.
+- **Multi-tenant data** — Mongo and Chroma use shared collections filtered by `user_id`; Postgres holds per-user auth rows.
+- **`/admin/*`** is unauthenticated in this demo build; lock it down before production.
+- **Google OAuth** redirects to the frontend with tokens in the query string briefly; tokens are then stored in `localStorage`.
+
 ## CI/CD
 
 GitHub Actions runs on every push and PR to `main`: **ruff** lint → **pytest** → Docker **build** → container **smoke test** (`/health`) → **publish** a `latest` and commit-`SHA`-tagged image to the GitHub Container Registry.
@@ -239,7 +290,7 @@ GitHub Actions runs on every push and PR to `main`: **ruff** lint → **pytest**
 - **Orchestration** — adopt **Google ADK** or **LangGraph** for typed state, retries, and tracing.
 - **Vector store** — graduate from ChromaDB to a managed store (**FAISS/Milvus**, or **MongoDB Atlas Vector Search** to unify the stack).
 - **Context cache** — **Redis / Memorystore** for hot conversation context.
-- **Multi-user** — real auth and per-user sessions backed by **Cloud SQL (Postgres)**.
+- **Multi-user sessions** — per-user conversations and optional multiple chats per user (auth + Postgres are in place).
 - **Evaluation** — replace keyword scoring with **LLM-as-judge** rubrics and online A/B testing.
 - **Deployment** — activate the Cloud Run CD pipeline for a live URL on every merge.
 
