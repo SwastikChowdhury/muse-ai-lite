@@ -28,10 +28,10 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 from groq import Groq
 
-from db import save_message, get_history, save_whisper, get_whispers
-from models import Message
+from db import save_message, get_history, save_whisper, get_whispers, save_flagged
+from models import Message, FlaggedMessage
 from orchestrator import handle_turn
-from metrics import active_ws, safety_escalations, model_rollbacks
+from metrics import active_ws, safety_escalations, model_rollbacks, moderation_flags, record_dominant_emotion
 from safety import check_safety
 from privacy import redact_pii
 from model_registry import REGISTRY, rollback
@@ -187,13 +187,36 @@ async def websocket_chat(websocket: WebSocket):
             # context, not the just-sent message duplicated into it).
             prior = await get_history(USER_ID, CONVERSATION_ID)
 
+            # Safety + moderation gate. Returns (escalation | None, mod_result).
+            # Run before persisting so the moderation verdict can be stamped onto
+            # the stored message. The mod_result is always present and always
+            # carries the recorded emotion distribution.
+            escalation, mod_result = check_safety(user_text)
+
+            # The flagged/flag_type/emotions fields are persisted to Mongo for
+            # observation but are never sent to the frontend (see history payload
+            # below). Emotions are recorded on every message for trend tracking.
             await save_message(Message(
                 user_id=USER_ID, conversation_id=CONVERSATION_ID,
                 role="user", content=user_text,
+                flagged=mod_result["flagged"], flag_type=mod_result.get("flag_type"),
+                emotions=mod_result.get("emotions"),
             ))
+            record_dominant_emotion("mentor", mod_result.get("emotions"))
 
-            # Safety: crisis messages never reach an agent
-            escalation = check_safety(user_text)
+            # Mirror flagged mentor input into the observation-only collection.
+            if mod_result["flagged"]:
+                moderation_flags.labels(role="mentor", flag_type=mod_result["flag_type"]).inc()
+                await save_flagged(FlaggedMessage(
+                    user_id=USER_ID, conversation_id=CONVERSATION_ID,
+                    role="mentor", content=user_text,
+                    flag_type=mod_result["flag_type"],
+                    suicide_score=mod_result.get("suicide_score"),
+                    crisis_score=mod_result.get("crisis_score"),
+                    toxic_scores=mod_result.get("toxic_scores"),
+                    emotions=mod_result.get("emotions"),
+                ))
+
             if escalation:
                 # Short-circuit: emit the crisis resource response as if it were
                 # a normal streamed reply, persist it, and skip the agents
@@ -210,12 +233,14 @@ async def websocket_chat(websocket: WebSocket):
             # Orchestrator streams tokens/whisper over the socket as a side
             # effect; it also returns the assembled values so we can persist
             # them here. Transport owns persistence, the orchestrator owns the
-            # agents.
-            full_reply, whisper_label, whisper = await handle_turn(websocket, prior, user_text, USER_ID)
+            # agents. The mentee mod_result lets us stamp the assistant message.
+            full_reply, whisper_label, whisper, mentee_mod = await handle_turn(websocket, prior, user_text, USER_ID, CONVERSATION_ID)
 
             await save_message(Message(
                 user_id=USER_ID, conversation_id=CONVERSATION_ID,
                 role="assistant", content=full_reply,
+                flagged=mentee_mod["flagged"], flag_type=mentee_mod.get("flag_type"),
+                emotions=mentee_mod.get("emotions"),
             ))
 
             # Only persist a whisper when the orchestrator actually produced

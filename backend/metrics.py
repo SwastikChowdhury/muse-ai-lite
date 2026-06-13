@@ -48,3 +48,29 @@ model_rollbacks = Counter(
     "Live model rollbacks by agent",
     ["agent"],
 )
+
+moderation_flags = Counter(
+    "muse_moderation_flags_total",
+    "Messages flagged by the moderation pipeline",
+    ["role", "flag_type"],  # role: mentor|mentee, flag_type: crisis|toxic|both
+)
+
+message_emotions = Counter(
+    "muse_message_emotions_total",
+    "Messages by dominant emotion (observability only, does not gate anything)",
+    ["role", "emotion"],  # role: mentor|mentee, emotion: anger|fear|sadness|joy|...
+)
+
+
+def record_dominant_emotion(role: str, emotions: dict | None) -> None:
+    """Increment the dominant-emotion counter for one message.
+
+    `emotions` is the full distribution from moderation.score_emotion (or empty
+    on failure). We chart the single strongest emotion per message so Grafana
+    can show, by rate, how mentor/mentee emotional tone shifts over time. A
+    no-op when there's nothing to record (e.g. moderation failed).
+    """
+    if not emotions:
+        return
+    dominant = max(emotions, key=emotions.get)
+    message_emotions.labels(role=role, emotion=dominant).inc()

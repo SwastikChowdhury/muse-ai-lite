@@ -2,7 +2,7 @@
   "title": "Muse — App Observability",
   "uid": "muse-obs",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "5s",
   "time": {"from": "now-1h", "to": "now"},
   "panels": [
@@ -84,6 +84,29 @@
       "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
       "gridPos": {"h": 6, "w": 16, "x": 8, "y": 28},
       "targets": [{"refId": "A", "expr": "sum by (status) (muse_whisper_grounding_total)", "legendFormat": "{{status}}"}]
+    },
+    {
+      "id": 11, "title": "Moderation flags by role & type", "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
+      "targets": [{"refId": "A", "expr": "sum by (role, flag_type) (muse_moderation_flags_total) or vector(0)", "legendFormat": "{{role}} · {{flag_type}}"}]
+    },
+    {
+      "id": 12, "title": "Messages by dominant emotion", "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
+      "targets": [{"refId": "A", "expr": "sum by (emotion) (muse_message_emotions_total)", "legendFormat": "{{emotion}}"}]
+    },
+    {
+      "id": 13, "title": "Dominant emotion over session (by role)", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"stacking": {"mode": "normal"}}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 42},
+      "targets": [{"refId": "A", "expr": "sum by (role, emotion) (muse_message_emotions_total)", "legendFormat": "{{role}} · {{emotion}}"}]
     }
   ]
 }

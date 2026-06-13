@@ -11,3 +11,5 @@ prometheus-fastapi-instrumentator
 python-dotenv
 presidio-analyzer
 presidio-anonymizer
+transformers
+torch

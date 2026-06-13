@@ -11,14 +11,34 @@ from orchestrator import verify_grounding
 
 
 def test_crisis_message_escalates():
-    """Crisis phrasing triggers escalation, and the response includes the 988 hotline."""
-    assert check_safety("I want to kill myself") is not None
-    assert "988" in check_safety("i've been thinking about self harm")
+    """Crisis phrasing triggers escalation, and the response includes the 988 hotline.
+
+    check_safety now returns (escalation | None, moderation_result); the keyword
+    fast path matches here so this never reaches the ML layer.
+    """
+    escalation, _ = check_safety("I want to kill myself")
+    assert escalation is not None
+    escalation, _ = check_safety("i've been thinking about self harm")
+    assert "988" in escalation
+
+
+def test_ml_crisis_escalates_without_keyword():
+    """Crisis phrasing that dodges the keyword list still escalates via Layer 2.
+
+    "jump from a building" matches none of the keyword patterns, so this only
+    passes if the suicidality model (primary crisis signal) fires.
+    """
+    escalation, mod = check_safety("I feel like I need to jump from a building")
+    assert escalation is not None and "988" in escalation
+    assert mod["flag_type"] in ("crisis", "both")
 
 
 def test_normal_message_passes():
     """Ordinary mentoring feedback is not flagged (no false-positive escalation)."""
-    assert check_safety("Alex, your report needs work") is None
+    escalation, mod = check_safety("Alex, your report needs work")
+    assert escalation is None
+    # The full emotion distribution is still recorded for observability.
+    assert isinstance(mod["emotions"], dict)
 
 
 def test_pii_redaction():

@@ -22,10 +22,16 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 load_dotenv()
 
+from models import FlaggedMessage
+
 client = AsyncIOMotorClient(os.environ["MONGODB_URI"])
 db = client["muse"]
 messages_collection = db["messages"]
 whispers_collection = db["whispers"]
+# Separate observation-only collection for messages the moderation pipeline
+# flagged. Kept apart from the transcript so flagged records can be reviewed and
+# cleared independently of the conversation history.
+flagged_collection = db["flagged_messages"]
 
 
 
@@ -53,6 +59,15 @@ async def get_history(user_id: str, conversation_id: str) -> list[dict]:
 async def save_whisper(message) -> None:
     """Insert one coaching whisper (stored separately from the transcript)."""
     await whispers_collection.insert_one(message.model_dump())
+
+
+async def save_flagged(msg: FlaggedMessage) -> None:
+    """Insert one moderation-flagged record into the flagged_messages collection.
+
+    Observation-only: this never affects the transcript a user sees, it just
+    captures the moderation signal (scores + flag type) for offline review.
+    """
+    await flagged_collection.insert_one(msg.model_dump())
 
 
 async def get_whispers(user_id: str, conversation_id: str) -> list[dict]:

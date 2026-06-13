@@ -50,4 +50,33 @@ class Message(BaseModel):
     role: str  # "user" or "assistant"
     content: str
     label: str | None = None
+    # Moderation observability fields. Set from the moderation pipeline result and
+    # persisted in MongoDB for offline review, but deliberately NEVER included in
+    # the WebSocket history/whisper payloads sent to the frontend.
+    flagged: bool = False
+    flag_type: str | None = None  # "crisis", "toxic", "both"
+    # Full emotion distribution recorded for EVERY message (mentor and mentee),
+    # so emotional trends can be tracked over time. Observability only — never
+    # gates anything and never sent to the frontend.
+    emotions: dict | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class FlaggedMessage(BaseModel):
+    """A message the moderation pipeline flagged, stored in its own collection.
+
+    This is an observation-only record: the full moderation signal (crisis proxy
+    score and per-category toxicity scores) is captured here for later review.
+    It is written alongside the normal transcript message but is never surfaced
+    to the frontend.
+    """
+    user_id: str
+    conversation_id: str
+    role: str  # "mentor" or "mentee"
+    content: str
+    flag_type: str  # "crisis", "toxic", "both"
+    suicide_score: float | None = None  # sentinet/suicidality probability (primary crisis signal)
+    crisis_score: float | None = None  # emotion distress proxy: sadness + fear combined (secondary)
+    toxic_scores: dict | None = None  # toxic-bert categories over threshold
+    emotions: dict | None = None  # full emotion distribution at flag time
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

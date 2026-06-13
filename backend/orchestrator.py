@@ -32,8 +32,18 @@ import time
 
 from agents import conversation_agent_stream, whisper_agent
 from memory import add_memory, get_relevant_memories
-from metrics import gemini_calls, agent_latency, whisper_grounding
+from metrics import gemini_calls, agent_latency, whisper_grounding, moderation_flags, record_dominant_emotion
 from llm_metrics import record_usage
+from moderation import moderate
+from db import save_flagged
+from models import FlaggedMessage
+
+# Shown in place of a mentee reply that toxic-bert flagged. Keeps the practice
+# session constructive instead of surfacing an abusive AI turn.
+TOXIC_FALLBACK = (
+    "I want to make sure our conversation stays constructive. "
+    "Let's refocus on the feedback."
+)
 
 # Shown to the user when the conversation model is rate-limited (HTTP 429 /
 # RESOURCE_EXHAUSTED). Phrased for an end user, not a developer.
@@ -138,7 +148,7 @@ async def _stream_mentee_reply(websocket, history, user_message) -> str:
     return fallback
 
 
-async def handle_turn(websocket, history, user_message, user_id):
+async def handle_turn(websocket, history, user_message, user_id, conversation_id):
     """Run one full coaching turn: mentee reply + grounded coach whisper.
 
     This is the orchestration entrypoint called by main.py per inbound message.
@@ -152,13 +162,14 @@ async def handle_turn(websocket, history, user_message, user_id):
       user_message -- the mentor's latest message (already PII-redacted)
       user_id      -- whose memories to retrieve/extend
 
-    Returns (full_reply, whisper_label, whisper_text): the assembled mentee
-    reply, the coach's one-word tone/category for the note, and the cleaned
-    coaching note (or None if the whisper agent ultimately failed). main.py uses
-    these to persist the turn; a None whisper is intentionally not persisted so
-    transient "model busy" filler never lands in history. The label is returned
-    even on failure (it falls back to "Insight") but is only persisted alongside
-    a truthy whisper.
+    Returns (full_reply, whisper_label, whisper_text, mentee_mod): the assembled
+    mentee reply, the coach's one-word tone/category for the note, the cleaned
+    coaching note (or None if the whisper agent ultimately failed), and the
+    mentee-output moderation verdict. main.py uses these to persist the turn; a
+    None whisper is intentionally not persisted so transient "model busy" filler
+    never lands in history. The label is returned even on failure (it falls back
+    to "Insight") but is only persisted alongside a truthy whisper. mentee_mod
+    lets main.py stamp the assistant message's flagged/flag_type fields.
 
     Side effects: websocket frames, a vector-memory write, and metrics.
     """
@@ -168,6 +179,35 @@ async def handle_turn(websocket, history, user_message, user_id):
     past_patterns = get_relevant_memories(user_id, user_message)
 
     full_reply = await _stream_mentee_reply(websocket, history, user_message)
+
+    # Moderate the mentee (AI) output before signalling done. We record the
+    # mentee's emotion distribution for tracking, but only ACT on toxicity: a
+    # crisis/suicidality signal isn't meaningful for an AI playing a character,
+    # so toxic-bert is the only gating layer for the mentee.
+    raw_mod = moderate(full_reply, role="mentee")
+    emotions = raw_mod.get("emotions")
+    record_dominant_emotion("mentee", emotions)
+    toxic_hits = raw_mod.get("toxic_scores")
+    mentee_mod = {
+        "flagged": bool(toxic_hits),
+        "flag_type": "toxic" if toxic_hits else None,
+        "suicide_score": None,
+        "crisis_score": None,
+        "toxic_scores": toxic_hits if toxic_hits else None,
+        "emotions": emotions,
+    }
+    if toxic_hits:
+        # Replace the abusive turn with a safe, on-task redirect and send that
+        # instead so the practice session stays constructive.
+        full_reply = TOXIC_FALLBACK
+        await websocket.send_json({"type": "token", "content": full_reply})
+        moderation_flags.labels(role="mentee", flag_type="toxic").inc()
+        await save_flagged(FlaggedMessage(
+            user_id=user_id, conversation_id=conversation_id,
+            role="mentee", content=full_reply,
+            flag_type="toxic", toxic_scores=toxic_hits, emotions=emotions,
+        ))
+
     # Tell the client the mentee reply is complete; the UI flips to a
     # "Muse is reflecting…" state while the whisper is generated.
     await websocket.send_json({"type": "done"})
@@ -215,4 +255,4 @@ async def handle_turn(websocket, history, user_message, user_id):
     # it can't influence retrieval for the turn that created it.
     add_memory(user_id, user_message)
 
-    return full_reply, whisper_label, whisper_text
+    return full_reply, whisper_label, whisper_text, mentee_mod
