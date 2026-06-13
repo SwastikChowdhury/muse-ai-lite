@@ -9,7 +9,7 @@ orchestration logic itself: streaming order, graceful quota handling, and the
 import asyncio
 from types import SimpleNamespace
 
-import orchestrator
+import app.agents.orchestrator as orchestrator
 
 
 class FakeWebSocket:
@@ -39,14 +39,19 @@ def test_handle_turn_happy_path(monkeypatch):
                         lambda h, m: _chunks("Hello ", "there"))
     monkeypatch.setattr(orchestrator, "whisper_agent",
                         lambda h, m, r, p: ("Tone", "Nice opening."))
+    # Stub the mentee-output moderation so the test stays model-free and
+    # deterministic; a benign verdict skips the toxic-fallback/save_flagged path.
+    monkeypatch.setattr(orchestrator, "moderate",
+                        lambda text, role: {"emotions": None, "toxic_scores": None})
 
-    full_reply, whisper_label, whisper = asyncio.run(
-        orchestrator.handle_turn(ws, [], "Hi Alex", "demo-user")
+    full_reply, whisper_label, whisper, mentee_mod = asyncio.run(
+        orchestrator.handle_turn(ws, [], "Hi Alex", "demo-user", "demo-conversation")
     )
 
     assert full_reply == "Hello there"
     assert whisper_label == "Tone"
     assert whisper == "Nice opening."
+    assert mentee_mod["flagged"] is False
     types_sent = [p["type"] for p in ws.sent]
     assert "token" in types_sent and "done" in types_sent and "whisper" in types_sent
 
@@ -61,8 +66,12 @@ def test_handle_turn_quota_exhausted(monkeypatch):
         raise Exception("429 RESOURCE_EXHAUSTED")
     monkeypatch.setattr(orchestrator, "conversation_agent_stream", boom)
     monkeypatch.setattr(orchestrator, "whisper_agent", lambda h, m, r, p: ("Tone", "note"))
+    monkeypatch.setattr(orchestrator, "moderate",
+                        lambda text, role: {"emotions": None, "toxic_scores": None})
 
-    full_reply, whisper_label, whisper = asyncio.run(orchestrator.handle_turn(ws, [], "Hi", "demo-user"))
+    full_reply, whisper_label, whisper, mentee_mod = asyncio.run(
+        orchestrator.handle_turn(ws, [], "Hi", "demo-user", "demo-conversation")
+    )
 
     assert "limit" in full_reply.lower()   # the graceful QUOTA_MSG, not a crash
     assert whisper_label == "Tone"
@@ -83,12 +92,16 @@ def test_handle_turn_whisper_failure_returns_none(monkeypatch):
     monkeypatch.setattr(orchestrator, "get_relevant_memories", lambda uid, q: [])
     monkeypatch.setattr(orchestrator, "add_memory", lambda uid, t: None)
     monkeypatch.setattr(orchestrator, "conversation_agent_stream", lambda h, m: _chunks("ok"))
+    monkeypatch.setattr(orchestrator, "moderate",
+                        lambda text, role: {"emotions": None, "toxic_scores": None})
 
     def boom(h, m, r, p):
         raise Exception("503 overloaded")
     monkeypatch.setattr(orchestrator, "whisper_agent", boom)
 
-    full_reply, whisper_label, whisper = asyncio.run(orchestrator.handle_turn(ws, [], "Hi", "demo-user"))
+    full_reply, whisper_label, whisper, mentee_mod = asyncio.run(
+        orchestrator.handle_turn(ws, [], "Hi", "demo-user", "demo-conversation")
+    )
 
     assert full_reply == "ok"
     assert whisper is None   # so main.py won't persist a fallback note

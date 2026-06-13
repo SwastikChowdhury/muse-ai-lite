@@ -33,8 +33,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-from llm_metrics import record_usage
-from model_registry import get_model
+from app.observability.llm_metrics import record_usage
+from app.observability.model_registry import get_model
 
 load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])

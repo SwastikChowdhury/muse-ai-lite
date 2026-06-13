@@ -25,7 +25,7 @@ from transformers import pipeline as hf_pipeline
 from google import genai
 from google.genai import types
 
-from metrics import grounding_llm_judge_calls
+from app.observability.metrics import grounding_llm_judge_calls
 
 load_dotenv()
 

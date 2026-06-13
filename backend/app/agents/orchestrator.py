@@ -30,14 +30,14 @@ import asyncio
 import re
 import time
 
-from agents import conversation_agent_stream, whisper_agent
-from grounding import verify_claim
-from memory import add_memory, get_relevant_memories
-from metrics import gemini_calls, agent_latency, whisper_grounding, moderation_flags, record_dominant_emotion
-from llm_metrics import record_usage
-from moderation import moderate
-from db import save_flagged
-from models import FlaggedMessage
+from app.agents.agents import conversation_agent_stream, whisper_agent
+from app.agents.grounding import verify_claim
+from app.memory.memory import add_memory, get_relevant_memories
+from app.observability.metrics import gemini_calls, agent_latency, whisper_grounding, moderation_flags, record_dominant_emotion
+from app.observability.llm_metrics import record_usage
+from app.safety.moderation import moderate
+from app.db.mongo import save_flagged
+from app.schemas.models import FlaggedMessage
 
 # Shown in place of a mentee reply that toxic-bert flagged. Keeps the practice
 # session constructive instead of surfacing an abusive AI turn.

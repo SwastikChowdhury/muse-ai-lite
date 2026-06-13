@@ -135,7 +135,7 @@ Backend (from `backend/`):
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000
 ```
 
 Frontend (from `frontend/`):
@@ -150,21 +150,23 @@ npm run dev        # Vite dev server on :5173
 ```
 muse-ai-lite/
 ├── backend/
-│   ├── agents.py             # conversation + whisper agents, prompts, label parsing
-│   ├── orchestrator.py       # per-turn agent coordination + grounding verification
-│   ├── main.py               # FastAPI app: WebSocket, transcribe, admin endpoints
-│   ├── memory.py             # ChromaDB vector memory (rerank, clear)
-│   ├── model_registry.py     # model-per-agent registry + rollback
-│   ├── safety.py             # crisis-escalation filter
-│   ├── privacy.py            # PII redaction
-│   ├── metrics.py            # Prometheus counters / gauges / histograms
-│   ├── llm_metrics.py        # token + estimated-cost accounting
-│   ├── db.py                 # Motor (async MongoDB) persistence
-│   ├── models.py             # Pydantic models
-│   ├── conftest.py           # pytest path / env setup
+│   ├── app/                      # application package (uvicorn app.main:app)
+│   │   ├── main.py               # FastAPI app: middleware, lifespan, router includes, /health
+│   │   ├── api/                  # transport/routers only
+│   │   │   ├── auth.py           # /auth/* (register, login, refresh, logout, google, me)
+│   │   │   ├── chat.py           # /ws + /transcribe
+│   │   │   └── admin.py          # /admin/* (models, rollback, clear-data)
+│   │   ├── agents/               # agents.py, orchestrator.py, grounding.py
+│   │   ├── safety/               # safety.py, privacy.py, moderation.py
+│   │   ├── db/                   # mongo.py (transcript) + postgres.py/models_sql.py/crud.py (auth)
+│   │   ├── memory/               # ChromaDB vector memory (rerank, clear)
+│   │   ├── auth/                 # password hashing, JWT/refresh tokens, Google OAuth
+│   │   ├── observability/        # metrics.py, llm_metrics.py, model_registry.py
+│   │   └── schemas/              # Pydantic models
+│   ├── conftest.py               # pytest path / env setup
 │   ├── requirements.txt
-│   ├── tests/                # pytest suite (runs in CI)
-│   └── evals/                # live evaluation harness
+│   ├── tests/                    # pytest suite (runs in CI)
+│   └── evals/                    # live evaluation harness
 ├── frontend/                 # React + Vite client
 ├── monitoring/
 │   ├── prometheus.yml
@@ -185,11 +187,18 @@ muse-ai-lite/
 | --- | --- | --- |
 | `GET` | `/health` | Liveness check |
 | `GET` | `/metrics` | Prometheus metrics |
-| `WS` | `/ws` | Streaming chat (history / token / done / whisper) |
+| `WS` | `/ws?token=<access_token>` | Streaming chat (history / token / done / whisper); requires a valid access token |
 | `POST` | `/transcribe` | Audio → text via Groq Whisper |
 | `GET` | `/admin/models` | Current model registry |
 | `POST` | `/admin/rollback/{agent}` | Roll an agent back to its previous model |
-| `DELETE` | `/admin/clear-data` | Wipe the user's conversation, whispers, and memories |
+| `DELETE` | `/admin/clear-data/{user_id}` | Wipe a user's conversation, whispers, and memories |
+| `POST` | `/auth/register` | Create an email/password account, returns token pair |
+| `POST` | `/auth/login` | Authenticate, returns token pair |
+| `POST` | `/auth/refresh` | Rotate refresh token, returns new token pair |
+| `POST` | `/auth/logout` | Revoke a refresh token |
+| `GET` | `/auth/google` | Begin Google OAuth flow |
+| `GET` | `/auth/google/callback` | Google OAuth callback, returns token pair |
+| `GET` | `/auth/me` | Current user profile (bearer token) |
 
 ## Testing
 

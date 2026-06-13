@@ -17,7 +17,7 @@ short-circuits the turn on a hit, and persists the returned moderation result
 (including the recorded emotion distribution).
 """
 
-from moderation import moderate
+from app.safety.moderation import moderate
 
 # Lowercased substrings that trigger escalation. Substring (not word-boundary)
 # matching is intentional so variants like "suicidal" are still caught.

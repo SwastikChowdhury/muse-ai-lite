@@ -11,8 +11,8 @@ matching — a smoke test for behaviour, not a strict grader.
 
 import asyncio
 
-from orchestrator import handle_turn
-from safety import check_safety
+from app.agents.orchestrator import handle_turn
+from app.safety.safety import check_safety
 
 # Conversation scenarios. Each is scored by whether the resulting whisper
 # mentions ANY of the expected keywords — a lenient proxy for "did the coach

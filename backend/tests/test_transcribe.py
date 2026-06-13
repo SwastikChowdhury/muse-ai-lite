@@ -4,9 +4,10 @@ import io
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
-import main
+from app.main import app
+from app.api import chat
 
-client = TestClient(main.app)
+client = TestClient(app)
 
 def test_transcribe(monkeypatch):
     """Uploaded audio is passed to the (mocked) STT client and its text is returned verbatim.
@@ -22,7 +23,7 @@ def test_transcribe(monkeypatch):
             )
         )
     )
-    monkeypatch.setattr(main, "groq_client", fake_groq)
+    monkeypatch.setattr(chat, "groq_client", fake_groq)
 
     resp = client.post(
         "/transcribe",

@@ -14,3 +14,10 @@ presidio-anonymizer
 transformers
 torch
 sentence-transformers
+asyncpg
+sqlalchemy[asyncio]
+alembic
+passlib[bcrypt]
+python-jose[cryptography]
+httpx
+python-dateutil

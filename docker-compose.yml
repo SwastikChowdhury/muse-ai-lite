@@ -5,8 +5,27 @@ services:
       - "8000:8000"
     env_file:
       - backend/.env
+    # Override POSTGRES_URI from .env: inside the compose network the database is
+    # reachable at the service name `postgres`, not localhost.
+    environment:
+      - POSTGRES_URI=postgresql+asyncpg://muse:muse@postgres:5432/muse
+      - FRONTEND_URL=http://localhost:8000
     volumes:
       - chroma_data:/app/chroma_data
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: muse
+      POSTGRES_PASSWORD: muse
+      POSTGRES_DB: muse
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     restart: unless-stopped
 
   prometheus:
@@ -36,3 +55,4 @@ volumes:
   chroma_data:
   prometheus_data:
   grafana_data:
+  postgres_data:

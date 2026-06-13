@@ -17,6 +17,8 @@
         pip install --extra-index-url https://download.pytorch.org/whl/cpu \
         -r requirements.txt
     COPY backend/ ./
-    COPY --from=frontend /frontend/dist ./static
+    # main.py now lives in the app/ package, and it resolves the SPA build
+    # relative to itself (app/static), so copy the frontend there.
+    COPY --from=frontend /frontend/dist ./app/static
     EXPOSE 8000
-    CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -20,9 +20,20 @@ import os
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from models import FlaggedMessage
+from app.schemas.models import FlaggedMessage
 
 load_dotenv()
+
+
+def conversation_id_for(user_id: str) -> str:
+    """Map a user to their single stable conversation id.
+
+    The chat is one continuous thread per user, so deriving the conversation id
+    deterministically from the user id keeps history/whispers replaying across
+    reconnects (versus a fresh random id per socket, which would orphan history).
+    Lives here because it's the key used for the MongoDB transcript queries.
+    """
+    return f"conv-{user_id}"
 
 client = AsyncIOMotorClient(os.environ["MONGODB_URI"])
 db = client["muse"]

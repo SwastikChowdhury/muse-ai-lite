@@ -2,35 +2,42 @@
  * App.jsx — the entire single-page UI for the Muse practice tool.
  *
  * Two-panel layout: a live chat with the AI "mentee" (left) and a private
- * coaching "whisper" feed from Muse (right). This component is the frontend
- * counterpart to backend/main.py's /ws endpoint and speaks its JSON protocol
- * directly:
+ * coaching "whisper" feed from Muse (right). Unauthenticated users see a
+ * Sign In / Create Account screen first; once logged in, the chat speaks the
+ * backend /ws JSON protocol directly:
  *   incoming  - {type:"history"|"token"|"done"|"whisper", ...}
  *   outgoing  - raw text (the mentor's message)
  *
- * Responsibilities held here: WebSocket lifecycle, streaming-token assembly
- * into the chat, optional voice input (mic -> /transcribe) and output
- * (browser speech synthesis), and autoscroll. There is no router or global
- * store — state is local because the app is intentionally one screen.
+ * Responsibilities held here: auth gate (localStorage + /auth/me), WebSocket
+ * lifecycle with token, streaming-token assembly, optional voice I/O, and
+ * autoscroll. No router — state is local because the app is one screen.
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
+import { COUNTRIES } from './countries';
+
+const API_BASE = 'http://localhost:8000';
+
+async function parseApiError(res, fallback) {
+  try {
+    const data = await res.json();
+    if (typeof data.detail === 'string') return data.detail;
+    if (Array.isArray(data.detail)) {
+      return data.detail.map((d) => d.msg || JSON.stringify(d)).join(', ');
+    }
+    return fallback;
+  } catch {
+    return res.ok ? fallback : `Server error (${res.status}). Please try again.`;
+  }
+}
 
 // Display metadata per message role. `assistant` is the AI mentee ("Alex");
-// `user` is the human mentor. Used to label/avatar each bubble consistently.
+// `user` is the human mentor. Mentor name is overridden with user.first_name.
 const SPEAKERS = {
   user: { name: 'You', sub: 'Mentor', initial: 'Y' },
   assistant: { name: 'Alex', sub: 'Mentee', initial: 'A' },
 };
 
-/**
- * Render a whisper string with any "quoted" spans italicized.
- *
- * The coach often suggests example phrasing in quotes; we emphasize those so
- * the mentor can spot the suggested wording at a glance. Splitting on a
- * capturing regex keeps the quotes as their own array entries, and the React
- * `key` is the index because the parts are positional and never reordered.
- */
 function renderWhisper(text) {
   const parts = text.split(/(".*?")/g);
   return parts.map((part, i) =>
@@ -40,12 +47,6 @@ function renderWhisper(text) {
   );
 }
 
-/**
- * Speak text aloud via the browser's SpeechSynthesis API (used when voice
- * output is toggled on). Cancels any in-flight utterance first so replies
- * don't queue up and overlap. No-ops when text is empty or the API is
- * unavailable. Pitch is nudged slightly up to suit the mentee persona.
- */
 function speak(text) {
   if (!text || !window.speechSynthesis) return;
   window.speechSynthesis.cancel();
@@ -56,59 +57,118 @@ function speak(text) {
 }
 
 export default function App() {
+  // ---- Auth state ---------------------------------------------------------
+  const [user, setUser] = useState(null);
+  const [accessToken, setAccessToken] = useState(null);
+  const [authTab, setAuthTab] = useState('signin');
+  const [authError, setAuthError] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [booting, setBooting] = useState(true);
+
+  // Sign-in form
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
+
+  // Register form
+  const [regFirstName, setRegFirstName] = useState('');
+  const [regLastName, setRegLastName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regDob, setRegDob] = useState('');
+  const [regLocation, setRegLocation] = useState('');
+  const [regNationality, setRegNationality] = useState('');
+
+  // ---- Chat state ---------------------------------------------------------
   const [messages, setMessages] = useState([]);
-  const [whispers, setWhispers] = useState([]);   // { label, content }
-  // True between a mentee reply finishing and its whisper arriving — drives the
-  // "Muse is reflecting…" indicator in the right panel.
+  const [whispers, setWhispers] = useState([]);
   const [reflecting, setReflecting] = useState(false);
   const [input, setInput] = useState('');
-  // True while a turn is in flight; disables the composer so the user can't
-  // send a second message mid-stream.
   const [loading, setLoading] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const wsRef = useRef(null);
-  // Accumulates the streamed mentee reply across many token frames so the whole
-  // utterance can be spoken once on "done". A ref (not state) because it changes
-  // on every token and must not trigger re-renders.
   const replyRef = useRef('');
-  // Mirror of `voiceOn` readable inside the ws.onmessage closure. The effect
-  // that sets up the socket runs once, so it would otherwise capture the initial
-  // voiceOn value forever; this ref gives the handler the current setting.
   const voiceOnRef = useRef(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const messagesEndRef = useRef(null);
   const whispersEndRef = useRef(null);
 
-  // Keep the voice-on ref in sync with state for the long-lived ws handler.
+  const clearAuth = useCallback(() => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    setUser(null);
+    setAccessToken(null);
+    setMessages([]);
+    setWhispers([]);
+  }, []);
+
+  const handleExpired = useCallback(() => {
+    clearAuth();
+  }, [clearAuth]);
+
   useEffect(() => { voiceOnRef.current = voiceOn; }, [voiceOn]);
 
-  // Open the chat socket once on mount and route inbound frames by type. Runs
-  // with an empty dep array so a single connection lives for the component's
-  // lifetime; the cleanup closes it on unmount.
+  // ---- Boot: OAuth query capture + session restore via /auth/me ------------
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8000/ws');
-    // On any connection failure/close, clear the in-flight indicators so the UI
-    // doesn't hang on a spinner.
+    const params = new URLSearchParams(window.location.search);
+    const urlAccess = params.get('access_token');
+    const urlRefresh = params.get('refresh_token');
+    if (urlAccess && urlRefresh) {
+      localStorage.setItem('access_token', urlAccess);
+      localStorage.setItem('refresh_token', urlRefresh);
+      window.history.replaceState({}, '', '/');
+    }
+
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      setBooting(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('invalid');
+        const profile = await res.json();
+        setUser({
+          id: profile.id,
+          email: profile.email,
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+        });
+        setAccessToken(token);
+      } catch {
+        clearAuth();
+      } finally {
+        setBooting(false);
+      }
+    })();
+  }, [clearAuth]);
+
+  // ---- WebSocket (only when authenticated) --------------------------------
+  useEffect(() => {
+    if (!accessToken) return;
+
+    const ws = new WebSocket(`${API_BASE.replace('http', 'ws')}/ws?token=${accessToken}`);
     ws.onerror = () => { setLoading(false); setReflecting(false); };
-    ws.onclose = () => { setLoading(false); setReflecting(false); };
+    ws.onclose = (event) => {
+      setLoading(false);
+      setReflecting(false);
+      if (event.code === 4001) handleExpired();
+    };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'history') {
-        // Rehydrate from server on connect. Persisted whispers carry their
-        // original tone/category label; fall back to "Insight" for any older
-        // note saved before labels were stored.
         setMessages(data.messages);
         if (data.whispers) {
           setWhispers(data.whispers.map((w) => ({ label: w.label || 'Insight', content: w.content })));
         }
       } else if (data.type === 'token') {
-        // Append each streamed chunk to both the spoken-text buffer and the last
-        // (assistant) bubble, which sendMessage pre-created as an empty
-        // placeholder — so tokens render in place as they arrive.
         replyRef.current += data.content;
         setMessages((prev) => {
           const updated = [...prev];
@@ -118,9 +178,6 @@ export default function App() {
           return updated;
         });
       } else if (data.type === 'done') {
-        // Mentee reply complete: stop the composer spinner, switch to the
-        // "reflecting" state while the whisper is computed, speak the full reply
-        // if voice is on, then reset the buffer for the next turn.
         setLoading(false);
         setReflecting(true);
         if (voiceOnRef.current) speak(replyRef.current);
@@ -133,20 +190,89 @@ export default function App() {
 
     wsRef.current = ws;
     return () => ws.close();
-  }, []);
+  }, [accessToken, handleExpired]);
 
-  // Autoscroll each panel to its newest item. Whisper scroll also fires on
-  // `reflecting` so the "reflecting…" indicator stays in view.
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { whispersEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [whispers, reflecting]);
 
-  /**
-   * Send a mentor message over the socket and optimistically render it.
-   *
-   * Guards against empty input and double-sends while loading. Pushes the
-   * user's bubble plus an empty assistant bubble that the streaming `token`
-   * handler will fill in. Shared by both typed and voice-transcribed input.
-   */
+  // ---- Auth handlers ------------------------------------------------------
+  const persistSession = (data) => {
+    localStorage.setItem('access_token', data.access_token);
+    localStorage.setItem('refresh_token', data.refresh_token);
+    setUser(data.user);
+    setAccessToken(data.access_token);
+    setAuthError(null);
+  };
+
+  const signIn = async (e) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: signInEmail, password: signInPassword }),
+      });
+      if (!res.ok) throw new Error(await parseApiError(res, 'Sign in failed'));
+      const data = await res.json();
+      persistSession(data);
+    } catch (err) {
+      setAuthError(err.message || 'Sign in failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const register = async (e) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: regEmail,
+          password: regPassword,
+          first_name: regFirstName,
+          last_name: regLastName,
+          dob: regDob,
+          location: regLocation.trim() || null,
+          nationality: regNationality || null,
+        }),
+      });
+      if (!res.ok) throw new Error(await parseApiError(res, 'Registration failed'));
+      const data = await res.json();
+      persistSession(data);
+    } catch (err) {
+      setAuthError(err.message || 'Registration failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (refreshToken) {
+      try {
+        await fetch(`${API_BASE}/auth/logout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      } catch {
+        // Best-effort revoke; still clear local session.
+      }
+    }
+    clearAuth();
+  };
+
+  const googleLogin = () => {
+    window.location.href = `${API_BASE}/auth/google`;
+  };
+
+  // ---- Chat handlers ------------------------------------------------------
   const sendMessage = (text) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
@@ -158,25 +284,15 @@ export default function App() {
       { role: 'assistant', content: '' },
     ]);
     setLoading(true);
-    wsRef.current.send(trimmed);
+    wsRef.current?.send(trimmed);
   };
 
-  /** Send the current text input and clear the field (the typed-message path). */
   const handleSend = () => {
     if (!input.trim()) return;
     sendMessage(input);
     setInput('');
   };
 
-  /**
-   * Begin capturing mic audio for voice input.
-   *
-   * Buffers chunks via MediaRecorder; the actual upload happens in `onstop`
-   * (wired here) so recording and transcription are decoupled — the user
-   * controls when capture ends. On stop we release the mic tracks (otherwise
-   * the browser keeps the "recording" indicator lit) and hand the assembled
-   * WebM blob to transcribeAndSend. A denied/missing mic surfaces an alert.
-   */
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -197,7 +313,6 @@ export default function App() {
     }
   };
 
-  /** Stop the active recording, which triggers the recorder's onstop -> upload. */
   const stopRecording = () => {
     if (mediaRecorderRef.current && recording) {
       mediaRecorderRef.current.stop();
@@ -205,20 +320,12 @@ export default function App() {
     }
   };
 
-  /**
-   * Upload recorded audio to the backend /transcribe endpoint and, if it yields
-   * text, feed that text into the normal chat flow via sendMessage.
-   *
-   * `transcribing` gates the UI (composer disabled, placeholder updated) for the
-   * round-trip. Failures are logged but non-fatal — the user can simply retry or
-   * type instead. Always clears the transcribing flag in `finally`.
-   */
   const transcribeAndSend = async (blob) => {
     setTranscribing(true);
     const form = new FormData();
     form.append('audio', blob, 'audio.webm');
     try {
-      const res = await fetch('http://localhost:8000/transcribe', { method: 'POST', body: form });
+      const res = await fetch(`${API_BASE}/transcribe`, { method: 'POST', body: form });
       const data = await res.json();
       const text = (data.text || '').trim();
       if (text) sendMessage(text);
@@ -228,6 +335,147 @@ export default function App() {
       setTranscribing(false);
     }
   };
+
+  // ---- Render gate --------------------------------------------------------
+  if (booting) return null;
+
+  if (!user) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card">
+          <div className="auth-tabs">
+            <button
+              type="button"
+              className={`auth-tab ${authTab === 'signin' ? 'active' : ''}`}
+              onClick={() => { setAuthTab('signin'); setAuthError(null); }}
+              disabled={authLoading}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              className={`auth-tab ${authTab === 'register' ? 'active' : ''}`}
+              onClick={() => { setAuthTab('register'); setAuthError(null); }}
+              disabled={authLoading}
+            >
+              Create Account
+            </button>
+          </div>
+
+          <button type="button" className="google-btn" onClick={googleLogin} disabled={authLoading}>
+            Sign in with Google
+          </button>
+
+          <div className="auth-divider"><span>or continue with email</span></div>
+
+          {authTab === 'signin' ? (
+            <form className="auth-form" onSubmit={signIn}>
+              <input
+                type="email"
+                placeholder="Email"
+                value={signInEmail}
+                onChange={(e) => setSignInEmail(e.target.value)}
+                disabled={authLoading}
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={signInPassword}
+                onChange={(e) => setSignInPassword(e.target.value)}
+                disabled={authLoading}
+                required
+              />
+              <button type="submit" className="auth-submit" disabled={authLoading}>
+                {authLoading ? 'Signing in…' : 'Sign In'}
+              </button>
+              <p className="auth-switch">
+                Don&apos;t have an account?{' '}
+                <button type="button" onClick={() => { setAuthTab('register'); setAuthError(null); }} disabled={authLoading}>
+                  Create one
+                </button>
+              </p>
+            </form>
+          ) : (
+            <form className="auth-form" onSubmit={register}>
+              <div className="name-row">
+                <input
+                  type="text"
+                  placeholder="First name"
+                  value={regFirstName}
+                  onChange={(e) => setRegFirstName(e.target.value)}
+                  disabled={authLoading}
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Last name"
+                  value={regLastName}
+                  onChange={(e) => setRegLastName(e.target.value)}
+                  disabled={authLoading}
+                  required
+                />
+              </div>
+              <input
+                type="email"
+                placeholder="Email"
+                value={regEmail}
+                onChange={(e) => setRegEmail(e.target.value)}
+                disabled={authLoading}
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={regPassword}
+                onChange={(e) => setRegPassword(e.target.value)}
+                disabled={authLoading}
+                required
+              />
+              <input
+                type="date"
+                value={regDob}
+                onChange={(e) => setRegDob(e.target.value)}
+                disabled={authLoading}
+                required
+              />
+              <input
+                type="text"
+                placeholder="Location (optional)"
+                value={regLocation}
+                onChange={(e) => setRegLocation(e.target.value)}
+                disabled={authLoading}
+              />
+              <select
+                value={regNationality}
+                onChange={(e) => setRegNationality(e.target.value)}
+                disabled={authLoading}
+                className="auth-select"
+              >
+                <option value="">Nationality (optional)</option>
+                {COUNTRIES.map((country) => (
+                  <option key={country} value={country}>{country}</option>
+                ))}
+              </select>
+              <button type="submit" className="auth-submit" disabled={authLoading}>
+                {authLoading ? 'Creating account…' : 'Create Account'}
+              </button>
+              <p className="auth-switch">
+                Already have an account?{' '}
+                <button type="button" onClick={() => { setAuthTab('signin'); setAuthError(null); }} disabled={authLoading}>
+                  Sign in
+                </button>
+              </p>
+            </form>
+          )}
+
+          {authError && <p className="auth-error">{authError}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  const mentorInitial = user.first_name?.charAt(0)?.toUpperCase() || 'Y';
 
   return (
     <div className="app">
@@ -240,22 +488,29 @@ export default function App() {
               <div className="contact-role">Mentee · practice partner</div>
             </div>
           </div>
-          <button
-            className="voice-toggle"
-            onClick={() => { if (voiceOn) window.speechSynthesis.cancel(); setVoiceOn((v) => !v); }}
-          >
-            {voiceOn ? '🔊 Voice on' : '🔈 Voice off'}
-          </button>
+          <div className="header-actions">
+            <button
+              className="voice-toggle"
+              onClick={() => { if (voiceOn) window.speechSynthesis.cancel(); setVoiceOn((v) => !v); }}
+            >
+              {voiceOn ? '🔊 Voice on' : '🔈 Voice off'}
+            </button>
+            <button type="button" className="logout-btn" onClick={logout}>
+              Log out
+            </button>
+          </div>
         </div>
 
         <div className="messages">
           {messages.map((msg, idx) => {
             const sp = SPEAKERS[msg.role] || SPEAKERS.assistant;
+            const name = msg.role === 'user' ? user.first_name : sp.name;
+            const initial = msg.role === 'user' ? mentorInitial : sp.initial;
             return (
               <div key={idx} className={`message ${msg.role}`}>
-                <div className="avatar">{sp.initial}</div>
+                <div className="avatar">{initial}</div>
                 <div className="bubble-col">
-                  <div className="speaker-name">{sp.name}<span className="speaker-sub"> · {sp.sub}</span></div>
+                  <div className="speaker-name">{name}<span className="speaker-sub"> · {sp.sub}</span></div>
                   <div className="message-content">{msg.content}</div>
                 </div>
               </div>

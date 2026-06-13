@@ -5,11 +5,11 @@ All three are pure/deterministic functions, so these run without any LLM or DB.
 
 import re
 
-import grounding
-from safety import check_safety
-from privacy import redact_pii
-from orchestrator import verify_grounding
-from grounding import verify_claim
+import app.agents.grounding as grounding
+from app.safety.safety import check_safety
+from app.safety.privacy import redact_pii
+from app.agents.orchestrator import verify_grounding
+from app.agents.grounding import verify_claim
 
 
 def test_crisis_message_escalates():
@@ -68,7 +68,7 @@ def test_grounding_valid_citation(monkeypatch):
     semantic check. We stub it to 'grounded' to keep this test focused on the
     structural path + marker stripping (no real model calls).
     """
-    monkeypatch.setattr("orchestrator.verify_claim", lambda claim, memory: "grounded")
+    monkeypatch.setattr("app.agents.orchestrator.verify_claim", lambda claim, memory: "grounded")
     text, status = verify_grounding("You're softening again [M1].", ["past note"])
     assert status == "grounded" and "[M1]" not in text
 
@@ -93,7 +93,7 @@ def test_grounding_combined_citation_is_stripped_and_verified(monkeypatch):
     """
     calls = []
     monkeypatch.setattr(
-        "orchestrator.verify_claim",
+        "app.agents.orchestrator.verify_claim",
         lambda claim, memory: calls.append(memory) or "grounded",
     )
     text, status = verify_grounding(
@@ -114,7 +114,7 @@ def test_grounding_combined_out_of_range_is_ungrounded():
 
 def test_grounding_strips_orphaned_whitespace(monkeypatch):
     """Stripping a mid-sentence marker leaves no double space or space-before-period."""
-    monkeypatch.setattr("orchestrator.verify_claim", lambda claim, memory: "grounded")
+    monkeypatch.setattr("app.agents.orchestrator.verify_claim", lambda claim, memory: "grounded")
     text, _ = verify_grounding("This pattern was seen in [M1].", ["a past pattern"])
     assert text == "This pattern was seen in."
 
