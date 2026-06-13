@@ -40,47 +40,8 @@ The system streams token-by-token over WebSockets, remembers your communication 
 - **Containerized & CI-tested** — one Docker image serves the whole app; GitHub Actions lints, tests, smoke-tests the container, and publishes to GHCR.
 
 ## Architecture
+> ![Architecture](docs/architecture.png)
 
-```mermaid
-flowchart TB
-    subgraph client [React client]
-        UI[Chat and Muse panel]
-        Mic[Microphone]
-    end
-
-    subgraph backend [FastAPI backend]
-        AUTH[Auth and JWT]
-        WS[WebSocket]
-        GATE[Safety and PII gate]
-        ORC[Orchestrator]
-        CONV[Conversation agent]
-        WHISPER[Whisper agent]
-        MEM[Memory agent]
-        TR[Transcribe]
-        REG[Model registry]
-        METRICS[Metrics endpoint]
-    end
-
-    Postgres[(Postgres)]
-    Mongo[(MongoDB)]
-    Chroma[(ChromaDB)]
-    Gemini[Gemini API]
-    Groq[Groq API]
-    Prometheus[(Prometheus)]
-    Grafana[Grafana]
-
-    UI -->|access token| WS
-    Mic --> TR --> Groq
-    AUTH --> Postgres
-    WS --> GATE --> ORC
-    ORC --> CONV --> Gemini
-    ORC --> WHISPER --> Gemini
-    ORC --> MEM --> Chroma
-    ORC --> Mongo
-    REG -.-> CONV
-    REG -.-> WHISPER
-    METRICS -.-> Prometheus --> Grafana
-```
 
 ### Request lifecycle (one turn)
 
