@@ -267,8 +267,41 @@ The backend exposes Prometheus metrics at `/metrics`, including app-specific ser
 - `muse_gemini_calls_total{agent, outcome}` — throughput and quota/error pressure
 - `muse_whisper_grounding_total{status}` — grounded vs ungrounded coaching notes
 - `muse_safety_escalations_total` — messages caught by the safety filter
+- `muse_active_websocket_connections` — live chat sockets
+- `http_requests_total`, `http_request_duration_seconds`, `http_requests_inprogress` — FastAPI HTTP instrumentation
 
-Grafana ships with a provisioned dashboard (spend, tokens, latency, calls, grounding, safety), brought up automatically by `docker compose`.
+Grafana ships with a provisioned **Developer Observability** dashboard (chat activity, LLM spend, agent latency, grounding, mentor-focused safety), brought up automatically by `docker compose`. Each panel has a **Measures / Helps you** description — hover the **ⓘ** icon on any panel title.
+
+### Persistence
+
+Metrics history is stored in Docker named volumes:
+
+| Volume | Service | Retention |
+|--------|---------|-----------|
+| `prometheus_data` | Prometheus TSDB | 30 days (configured in `docker-compose.yml`) |
+| `grafana_data` | Grafana settings & UI edits | until removed |
+
+- **`docker compose down` then `up`** — data is kept (volumes are not removed).
+- **`docker compose down -v`** — **deletes all volumes**, including metrics history. Avoid `-v` unless you intentionally want a clean slate.
+- **App container restarts** reset in-process counters, but Prometheus retains scraped history. The dashboard uses `rate()` / `increase()` so time-series stay meaningful across restarts.
+
+After changing provisioned dashboard files, Grafana reloads them every 30 seconds, or restart the Grafana container to pick them up immediately.
+
+### Alert rules
+
+Prometheus evaluates a small set of dev-friendly rules in `monitoring/rules/muse-alerts.yml`:
+
+| Alert | Fires when |
+|-------|------------|
+| `MuseAppDown` | App scrape target unreachable for 1m |
+| `HighHTTP5xxRate` | 5xx rate &gt; 0.05 req/s for 2m |
+| `HighHTTPLatencyP95` | HTTP p95 &gt; 5s for 5m |
+| `GeminiCallErrors` | Any non-ok Gemini calls for 2m |
+| `HighAgentLatencyP95` | Agent p95 &gt; 30s for 5m |
+| `SafetyEscalationsDetected` | Any safety blocks in the last 10m |
+| `HighLLMCostRate` | Estimated spend &gt; $1/hr for 10m |
+
+View firing and pending alerts at **http://localhost:9090/alerts** after `docker compose up`. No Alertmanager is configured yet — alerts are visible in Prometheus (and can be wired to Slack/email later).
 
 ## Security notes
 

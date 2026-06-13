@@ -10,8 +10,8 @@ registry and trigger `rollback`, giving a fast "undo" if a newly promoted model
 regresses in production. State is in-memory, so changes reset on restart — fine
 for a demo, but a real deployment would back this with a datastore.
 
-NOTE: pricing/cost estimation lives in llm_metrics.py and must be kept in sync
-with the models chosen here.
+NOTE: llm_metrics.py prices each call via get_model() — add a PRICES row in
+llm_metrics when you point an agent at a new model id here.
 """
 
 REGISTRY = {

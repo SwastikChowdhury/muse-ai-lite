@@ -1,0 +1,65 @@
+groups:
+  - name: muse-app
+    rules:
+      - alert: MuseAppDown
+        expr: up{job="muse-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Muse app is not reachable
+          description: Prometheus cannot scrape {{ $labels.instance }} for more than 1 minute. Check that the app container is running and healthy.
+
+      - alert: HighHTTP5xxRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Elevated HTTP 5xx error rate
+          description: Server errors are occurring at {{ $value | humanize }} req/s (threshold 0.05). Inspect recent logs and failing routes.
+
+      - alert: HighHTTPLatencyP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: HTTP p95 latency is high
+          description: Overall HTTP p95 latency is {{ $value | humanizeDuration }} (threshold 5s). Slow auth, transcribe, or admin routes may be involved.
+
+      - alert: GeminiCallErrors
+        expr: sum(rate(muse_gemini_calls_total{outcome!="ok"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Gemini API errors or quota pressure
+          description: Non-ok Gemini calls at {{ $value | humanize }}/s. Check API keys, quota limits, and orchestrator logs.
+
+      - alert: HighAgentLatencyP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(muse_agent_latency_seconds_bucket[5m]))) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Agent p95 latency is high
+          description: Agent p95 latency is {{ $value | humanizeDuration }} (threshold 30s). Conversation or whisper agents may be stalling.
+
+      - alert: SafetyEscalationsDetected
+        expr: sum(increase(muse_safety_escalations_total[10m])) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: Safety filter escalations in the last 10 minutes
+          description: "{{ $value | humanize }} message(s) were blocked by the safety filter. Review flagged content if unexpected."
+
+      - alert: HighLLMCostRate
+        expr: sum(rate(muse_llm_cost_usd_total[15m])) * 3600 > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: High estimated LLM spend rate
+          description: Estimated LLM cost is ${{ $value | humanize }}/hr (threshold $1/hr). Consider shorter sessions or cheaper model tiers during dev.

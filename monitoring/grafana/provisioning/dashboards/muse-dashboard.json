@@ -1,112 +1,722 @@
 {
-  "title": "Muse — App Observability",
-  "uid": "muse-obs",
-  "schemaVersion": 39,
-  "version": 6,
-  "refresh": "5s",
-  "time": {"from": "now-1h", "to": "now"},
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Developer observability for muse-ai-lite: chat activity, LLM spend, agent latency, grounding quality, and mentor safety signals.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
   "panels": [
     {
-      "id": 1, "title": "Total estimated spend", "type": "stat",
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 6}, "overrides": []},
-      "options": {"reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}, "colorMode": "value", "graphMode": "area"},
-      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
-      "targets": [{"refId": "A", "expr": "sum(muse_llm_cost_usd_total)"}]
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 100,
+      "panels": [],
+      "title": "Service overview",
+      "type": "row"
     },
     {
-      "id": 2, "title": "Total tokens", "type": "stat",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
-      "options": {"reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}, "colorMode": "value", "graphMode": "area"},
-      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
-      "targets": [{"refId": "A", "expr": "sum(muse_llm_tokens_total)"}]
+      "description": "Measures: How many mentors currently have an open chat connection (/ws).\nHelps you: Confirm someone is in a live session and correlate connection count with turns, cost, or latency spikes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"fixedColor": "blue", "mode": "fixed"},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(muse_active_websocket_connections)", "legendFormat": "", "refId": "A"}],
+      "title": "Active WebSockets",
+      "type": "stat"
     },
     {
-      "id": 3, "title": "Conversation turns", "type": "stat",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
-      "options": {"reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}, "colorMode": "value", "graphMode": "area"},
-      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
-      "targets": [{"refId": "A", "expr": "sum(muse_gemini_calls_total{agent=\"conversation\", outcome=\"ok\"})"}]
+      "description": "Measures: Server-side HTTP failures per second (status 500–599).\nHelps you: Catch app crashes or broken dependencies early — this should stay at zero.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.01},
+              {"color": "red", "value": 0.1}
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))", "legendFormat": "5xx/s", "refId": "A"}],
+      "title": "HTTP 5xx rate",
+      "type": "stat"
     },
     {
-      "id": 4, "title": "Tokens by agent & kind", "type": "bargauge",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
-      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
-      "targets": [{"refId": "A", "expr": "sum by (agent, kind) (muse_llm_tokens_total)", "legendFormat": "{{agent}} · {{kind}}"}]
+      "description": "Measures: Failed or quota-blocked Gemini calls per minute (quota + error combined, conversation + whisper).\nHelps you: Top-level health check — should stay at zero. Non-zero means check API keys, quota, or orchestrator logs.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"suffix": " /min"},
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.6},
+              {"color": "red", "value": 3}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(muse_gemini_calls_total{outcome!=\"ok\"}[$__rate_interval])) * 60", "legendFormat": "errors/min", "refId": "A"}],
+      "title": "Gemini errors per minute",
+      "type": "stat"
     },
     {
-      "id": 5, "title": "Estimated cost by agent (USD)", "type": "bargauge",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 6}, "overrides": []},
-      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
-      "targets": [{"refId": "A", "expr": "sum by (agent) (muse_llm_cost_usd_total)", "legendFormat": "{{agent}}"}]
+      "description": "Measures: Estimated LLM spend per hour (token counts × hardcoded Gemini pricing).\nHelps you: Catch runaway cost during dev — spikes mean heavier chat, longer replies, or retries.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "decimals": 4,
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(muse_llm_cost_usd_total[$__rate_interval])) * 3600", "legendFormat": "USD/hr", "refId": "A"}],
+      "title": "LLM cost rate",
+      "type": "stat"
     },
     {
-      "id": 6, "title": "Gemini calls by agent & outcome", "type": "bargauge",
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
-      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
-      "targets": [{"refId": "A", "expr": "sum by (agent, outcome) (muse_gemini_calls_total)", "legendFormat": "{{agent}} · {{outcome}}"}]
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+      "id": 101,
+      "panels": [],
+      "title": "HTTP / API",
+      "type": "row"
     },
     {
-      "id": 7, "title": "Avg latency by agent (s)", "type": "bargauge",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "s", "decimals": 2}, "overrides": []},
-      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
-      "targets": [{"refId": "A", "expr": "sum by (agent) (muse_agent_latency_seconds_sum) / sum by (agent) (muse_agent_latency_seconds_count)", "legendFormat": "{{agent}}"}]
+      "description": "Measures: HTTP request rate split into 2xx (success), 4xx (client error), and 5xx (server error).\nHelps you: Verify the app is healthy at the REST layer — mostly scrapes and auth; chat itself uses WebSockets.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 35,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "normal"}
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "id": 12,
+      "options": {
+        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(http_requests_total{status=~\"2..\"}[$__rate_interval]))", "legendFormat": "2xx", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(http_requests_total{status=~\"4..\"}[$__rate_interval]))", "legendFormat": "4xx", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))", "legendFormat": "5xx", "refId": "C"}
+      ],
+      "title": "HTTP status mix",
+      "type": "timeseries"
     },
     {
-      "id": 8, "title": "Cumulative LLM tokens over session", "type": "timeseries",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"stacking": {"mode": "normal"}}}, "overrides": []},
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
-      "targets": [{"refId": "A", "expr": "sum by (agent, kind) (muse_llm_tokens_total)", "legendFormat": "{{agent}} · {{kind}}"}]
+      "description": "Measures: How long REST endpoints take — p50 (typical), p95 (slow tail), p99 (worst).\nHelps you: Debug auth or admin slowness — not chat turn time (see Agent latency).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"}
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "id": 11,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p50", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p99", "refId": "C"}
+      ],
+      "title": "HTTP latency percentiles",
+      "type": "timeseries"
     },
     {
-      "id": 9, "title": "Safety escalations", "type": "stat",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
-      "options": {"reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}, "colorMode": "value", "graphMode": "none"},
-      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 28},
-      "targets": [{"refId": "A", "expr": "sum(muse_safety_escalations_total) or vector(0)"}]
+      "description": "Measures: HTTP requests currently being processed by the app.\nHelps you: Spot REST concurrency spikes — not chat WebSocket traffic.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"}
+          },
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "id": 13,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(http_requests_inprogress)", "legendFormat": "in flight", "refId": "A"}],
+      "title": "In-flight HTTP requests",
+      "type": "timeseries"
     },
     {
-      "id": 10, "title": "Whisper grounding status", "type": "bargauge",
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
-      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
-      "gridPos": {"h": 6, "w": 16, "x": 8, "y": 28},
-      "targets": [{"refId": "A", "expr": "sum by (status) (muse_whisper_grounding_total)", "legendFormat": "{{status}}"}]
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22},
+      "id": 102,
+      "panels": [],
+      "title": "LLM usage & cost",
+      "type": "row"
     },
     {
-      "id": 11, "title": "Moderation flags by role & type", "type": "bargauge",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
-      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
-      "targets": [{"refId": "A", "expr": "sum by (role, flag_type) (muse_moderation_flags_total) or vector(0)", "legendFormat": "{{role}} · {{flag_type}}"}]
+      "description": "Measures: LLM tokens consumed per minute, split by agent (conversation = mentee reply, whisper = coach note).\nHelps you: See which agent drives token volume and correlate spikes with cost or latency.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"},
+            "suffix": " /min"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 23},
+      "id": 20,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (agent) (rate(muse_llm_tokens_total[$__rate_interval])) * 60", "legendFormat": "{{agent}}", "refId": "A"}],
+      "title": "Token throughput by agent (per min)",
+      "type": "timeseries"
     },
     {
-      "id": 12, "title": "Messages by dominant emotion", "type": "bargauge",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
-      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": {"calc": "lastNotNull", "fields": "", "values": false}},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
-      "targets": [{"refId": "A", "expr": "sum by (emotion) (muse_message_emotions_total)", "legendFormat": "{{emotion}}"}]
+      "description": "Measures: Prompt (input) vs completion (output) tokens per minute.\nHelps you: Tell whether cost growth comes from longer context (prompt) or longer replies (completion).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "normal"},
+            "suffix": " /min"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 23},
+      "id": 21,
+      "options": {
+        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (agent, kind) (rate(muse_llm_tokens_total[$__rate_interval])) * 60", "legendFormat": "{{agent}} · {{kind}}", "refId": "A"}],
+      "title": "Prompt vs completion tokens (per min)",
+      "type": "timeseries"
     },
     {
-      "id": 13, "title": "Dominant emotion over session (by role)", "type": "timeseries",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"stacking": {"mode": "normal"}}}, "overrides": []},
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 42},
-      "targets": [{"refId": "A", "expr": "sum by (role, emotion) (muse_message_emotions_total)", "legendFormat": "{{role}} · {{emotion}}"}]
+      "description": "Measures: Estimated LLM spend per hour by agent (token counts × hardcoded pricing).\nHelps you: Compare conversation vs whisper cost share and spot which agent to optimize or downgrade.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"}
+          },
+          "decimals": 4,
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 31},
+      "id": 22,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (agent) (rate(muse_llm_cost_usd_total[$__rate_interval])) * 3600", "legendFormat": "{{agent}} USD/hr", "refId": "A"}],
+      "title": "Estimated cost rate by agent",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Estimated USD spent in the period shown in the time picker (top-right, e.g. Last 6 hours), split by conversation (mentee reply) vs whisper (coach note). Sum of both bars = total.\nHelps you: Answer how much a dev session or test window cost, and which agent drove spend. Estimate only (hardcoded pricing), not a Google Cloud bill.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "decimals": 4,
+          "min": 0,
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 31},
+      "id": 23,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (agent) (increase(muse_llm_cost_usd_total[$__range]))", "legendFormat": "{{agent}}", "refId": "A"}],
+      "title": "Estimated spend in time range",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Estimated USD spent per hour, bucketed by hour, split by agent.\nHelps you: See when spend happened during the window — bars should line up with active chat periods, not sit flat or jump randomly.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "normal"}
+          },
+          "decimals": 4,
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 35},
+      "id": 24,
+      "options": {
+        "legend": {"calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (agent) (increase(muse_llm_cost_usd_total[1h]))", "legendFormat": "{{agent}}", "refId": "A"}],
+      "title": "Spend per hour",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 39},
+      "id": 103,
+      "panels": [],
+      "title": "Agent performance",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: End-to-end agent response time — p50 (typical) and p95 (slow tail) for conversation (mentee stream) and whisper (coach note).\nHelps you: Find slow agents or model tiers — this is chat turn latency, not HTTP.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"}
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+      "id": 31,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.50, sum by (le, agent) (rate(muse_agent_latency_seconds_bucket[$__rate_interval])))", "legendFormat": "{{agent}} p50", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (le, agent) (rate(muse_agent_latency_seconds_bucket[$__rate_interval])))", "legendFormat": "{{agent}} p95", "refId": "B"}
+      ],
+      "title": "Agent latency percentiles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Successful mentee replies per minute (one per chat turn). Each turn also runs a whisper call (~2 Gemini calls total).\nHelps you: See how active practice is right now — the best single chat throughput signal.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"},
+            "suffix": " /min"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 40},
+      "id": 32,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(muse_gemini_calls_total{agent=\"conversation\", outcome=\"ok\"}[$__rate_interval])) * 60", "legendFormat": "turns/min", "refId": "A"}],
+      "title": "Conversation turns per minute",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Times an admin rolled an agent back to its previous model via /admin/rollback, in the selected time range.\nHelps you: Audit model experiments — should almost always be zero.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 40},
+      "id": 33,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(increase(muse_model_rollbacks_total[$__range]))", "legendFormat": "", "refId": "A"}],
+      "title": "Model rollbacks in range",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 48},
+      "id": 104,
+      "panels": [],
+      "title": "Whisper & grounding",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Coach notes classified per minute — grounded (valid citations), ungrounded (bad/hallucinated citation), no_memory (no citations, normal).\nHelps you: Monitor coaching quality — rising ungrounded means the whisper agent is mis-citing memories.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "normal"},
+            "suffix": " /min"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 49},
+      "id": 40,
+      "options": {
+        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (status) (rate(muse_whisper_grounding_total[$__rate_interval])) * 60", "legendFormat": "{{status}}", "refId": "A"}],
+      "title": "Whisper grounding (per min)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: LLM judge fallback invocations per minute when vector/NLI grounding is inconclusive.\nHelps you: Spot ambiguous coach notes — higher values mean more claims needed extra verification (extra cost).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"fixedColor": "purple", "mode": "fixed"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"},
+            "suffix": " /min"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 49},
+      "id": 41,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": false},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(muse_grounding_llm_judge_total[$__rate_interval])) * 60", "legendFormat": "judge calls/min", "refId": "A"}],
+      "title": "Grounding LLM judge fallback",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 57},
+      "id": 105,
+      "panels": [],
+      "title": "Safety & moderation (mentor-focused)",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Mentor messages blocked by the crisis safety filter in the selected time range (before any LLM ran).\nHelps you: Audit crisis events — each block sends crisis resources instead of a normal reply.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 4, "x": 0, "y": 58},
+      "id": 50,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(increase(muse_safety_escalations_total[$__range]))", "legendFormat": "", "refId": "A"}],
+      "title": "Safety escalations in range",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Number of crisis escalations per minute (one bar when at least one occurred that minute).\nHelps you: Pinpoint exactly when a crisis block happened — easier to spot than a flat rate line.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"fixedColor": "orange", "mode": "fixed"},
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"}
+          },
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 4, "x": 4, "y": 58},
+      "id": 53,
+      "options": {
+        "legend": {"calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": false},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(increase(muse_safety_escalations_total[1m]))", "legendFormat": "escalations", "refId": "A"}],
+      "title": "Safety escalation timeline",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Mentor messages flagged per minute — crisis (suicidality/crisis language), toxic (abusive), or both.\nHelps you: Track mentor input safety trends; crisis flags also trigger escalation above.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "normal"},
+            "suffix": " /min"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 58},
+      "id": 51,
+      "options": {
+        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(muse_moderation_flags_total{role=\"mentor\", flag_type=\"crisis\"}[$__rate_interval])) * 60", "legendFormat": "crisis", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(muse_moderation_flags_total{role=\"mentor\", flag_type=\"toxic\"}[$__rate_interval])) * 60", "legendFormat": "toxic", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(muse_moderation_flags_total{role=\"mentor\", flag_type=\"both\"}[$__rate_interval])) * 60", "legendFormat": "both", "refId": "C"}
+      ],
+      "title": "Mentor moderation flags",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Measures: Strongest detected emotion per mentor message, per minute (anger, fear, joy, etc.).\nHelps you: Observe emotional tone trends during practice — does not block or change responses.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "normal"},
+            "suffix": " /min"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 58},
+      "id": 52,
+      "options": {
+        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (emotion) (rate(muse_message_emotions_total{role=\"mentor\"}[$__rate_interval])) * 60", "legendFormat": "{{emotion}}", "refId": "A"}],
+      "title": "Mentor dominant emotions",
+      "type": "timeseries"
     }
-  ]
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["muse", "observability", "developers"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Muse — Developer Observability",
+  "uid": "muse-obs",
+  "version": 4
 }

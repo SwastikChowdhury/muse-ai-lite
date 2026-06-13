@@ -1,7 +1,15 @@
 global:
-  scrape_interval: 5s
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/muse-alerts.yml
 
 scrape_configs:
   - job_name: muse-app
+    metrics_path: /metrics
     static_configs:
       - targets: ["app:8000"]
+        labels:
+          service: muse-app

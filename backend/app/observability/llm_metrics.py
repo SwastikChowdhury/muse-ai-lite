@@ -6,13 +6,16 @@ it turns each Gemini response's usage_metadata into Prometheus counters for
 tokens consumed and estimated USD cost, broken out per agent. Lets us watch the
 relative cost of the conversation vs. whisper agents and catch runaway spend.
 
-Cost is an *estimate*: token counts are exact (from the API), but the per-token
-prices and the agent->model mapping are hardcoded here and must be kept in sync
-with model_registry.py when models change. record_usage is called by agents.py
-(whisper) and orchestrator.py (conversation, after the stream completes).
+Cost is an *estimate*: token counts are exact (from the API), but USD is computed
+from Google's published per-1M-token rates below. The model id comes from
+model_registry.get_model() at record time (including after live rollbacks).
+Add a PRICES entry whenever REGISTRY adopts a new model id. record_usage is
+called by agents.py (whisper) and orchestrator.py (conversation, after the stream).
 """
 
 from prometheus_client import Counter
+
+from app.observability.model_registry import get_model
 
 llm_tokens = Counter(
     "muse_llm_tokens_total",
@@ -26,20 +29,18 @@ llm_cost = Counter(
     ["agent"],
 )
 
-# USD per token (input, output). Source: Google Gemini API pricing.
+# USD per token (input, output). Paid tier, standard — ai.google.dev/gemini-api/docs/pricing
 PRICES = {
-    "gemini-2.5-flash":      {"in": 0.30 / 1_000_000, "out": 2.50 / 1_000_000},
-    "gemini-3-flash":        {"in": 0.50 / 1_000_000, "out": 3.00 / 1_000_000},
+    # Active in REGISTRY (conversation)
     "gemini-3.5-flash":      {"in": 1.50 / 1_000_000, "out": 9.00 / 1_000_000},
+    # Active in REGISTRY (whisper)
     "gemini-3.1-flash-lite": {"in": 0.25 / 1_000_000, "out": 1.50 / 1_000_000},
+    # Rollback / alternate models referenced in model_registry.py
+    "gemini-2.5-flash":      {"in": 0.30 / 1_000_000, "out": 2.50 / 1_000_000},
+    "gemini-2.5-flash-lite": {"in": 0.10 / 1_000_000, "out": 0.40 / 1_000_000},
+    "gemini-3-flash":        {"in": 0.50 / 1_000_000, "out": 3.00 / 1_000_000},
 }
-_DEFAULT = {"in": 0.30 / 1_000_000, "out": 2.50 / 1_000_000}
-
-# Which model each agent runs on (edit if you change buckets).
-AGENT_MODEL = {
-    "conversation": "gemini-2.5-flash", # "gemini-3.5-flash"
-    "whisper": "gemini-2.5-flash", # "gemini-3.1-flash-lite"
-}
+_DEFAULT = {"in": 1.50 / 1_000_000, "out": 9.00 / 1_000_000}
 
 
 def record_usage(agent: str, usage) -> None:
@@ -49,9 +50,8 @@ def record_usage(agent: str, usage) -> None:
     never reported usage, in which case we no-op). Attribute reads are defensive
     (getattr ... or 0) because not every response/chunk populates both counts.
 
-    Cost falls back to `_DEFAULT` pricing if the agent's model isn't in PRICES,
-    so an unknown/newly-swapped model still produces a (rough) cost figure rather
-    than zero. Side effect: increments the llm_tokens and llm_cost counters.
+    Cost uses get_model(agent) for the price row; falls back to `_DEFAULT` if the
+    model id isn't in PRICES yet. Side effect: increments llm_tokens and llm_cost.
     """
     if usage is None:
         return
@@ -61,5 +61,6 @@ def record_usage(agent: str, usage) -> None:
     llm_tokens.labels(agent=agent, kind="prompt").inc(prompt)
     llm_tokens.labels(agent=agent, kind="completion").inc(completion)
 
-    price = PRICES.get(AGENT_MODEL.get(agent, ""), _DEFAULT)
+    model = get_model(agent)
+    price = PRICES.get(model, _DEFAULT)
     llm_cost.labels(agent=agent).inc(prompt * price["in"] + completion * price["out"])
